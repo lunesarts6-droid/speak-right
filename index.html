@@ -1,11 +1,128 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>SpeakRight</title>
-    <meta charset="UTF-8" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpeakRight</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #eef2f7;
+      margin: 0;
+      padding: 25px;
+      text-align: center;
+    }
+
+    .container {
+      max-width: 650px;
+      margin: auto;
+      background: #ffffff;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+    }
+
+    textarea {
+      width: 100%;
+      height: 180px;
+      padding: 15px;
+      font-size: 17px;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+      resize: none;
+      outline: none;
+    }
+
+    select, button {
+      padding: 12px;
+      margin-top: 12px;
+      width: 100%;
+      font-size: 16px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+    }
+
+    select {
+      background: #f1f1f1;
+    }
+
+    button {
+      background: #0066ff;
+      color: white;
+      font-weight: bold;
+    }
+
+    button:hover {
+      background: #004acc;
+    }
+
+    .label {
+      text-align: left;
+      font-weight: bold;
+      margin: 10px 0 5px 0;
+      color: #333;
+    }
+
+    #status {
+      margin-top: 20px;
+      font-size: 16px;
+    }
+  </style>
 </head>
+
 <body>
-    <h1>Welcome to SpeakRight</h1>
-    <p>Your AI pronunciation assistant.</p>
+
+  <div class="container">
+    <h1>🎤 SpeakRight</h1>
+    <p>Your AI-powered pronunciation trainer.</p>
+
+    <div class="label">Paste your text here:</div>
+    <textarea id="userText" placeholder="Paste any text for pronunciation…"></textarea>
+
+    <div class="label">Choose voice accent:</div>
+    <select id="voiceSelect">
+      <option value="en-US">🇺🇸 English – US</option>
+      <option value="en-GB">🇬🇧 English – UK</option>
+      <option value="en-AU">🇦🇺 English – Australia</option>
+      <option value="en-CA">🇨🇦 English – Canada</option>
+    </select>
+
+    <div class="label">Speaking speed:</div>
+    <select id="speedSelect">
+      <option value="0.8">🐢 Slow</option>
+      <option value="1">⚖️ Normal</option>
+      <option value="1.3">🐇 Fast</option>
+    </select>
+
+    <button onclick="startPronunciation()">🔊 Play Pronunciation</button>
+
+    <p id="status"></p>
+  </div>
+
+  <script>
+    function startPronunciation() {
+      const text = document.getElementById("userText").value;
+      const voice = document.getElementById("voiceSelect").value;
+      const speed = document.getElementById("speedSelect").value;
+      const status = document.getElementById("status");
+
+      if (!text.trim()) {
+        status.innerHTML = "⚠️ Please paste some text first.";
+        status.style.color = "red";
+        return;
+      }
+
+      status.innerHTML = "🔊 Speaking...";
+      status.style.color = "green";
+
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = voice;
+      utter.rate = parseFloat(speed);
+
+      speechSynthesis.speak(utter);
+    }
+  </script>
+
 </body>
 </html>
