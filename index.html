@@ -1,202 +1,331 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>SpeakRight - Pronunciation Trainer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-    body { font-family: Arial, sans-serif; background: #f7f7f7; margin: 0; padding: 20px; }
-    h1 { text-align: center; font-size: 26px; margin-bottom: 20px; }
-    #inputBox {
-        width: 100%; height: 120px; padding: 12px; font-size: 16px;
-        border: 1px solid #bbb; border-radius: 8px; resize: none;
-    }
-    button {
-        width: 100%; padding: 14px; background: #000; color: white;
-        font-size: 18px; border: none; border-radius: 8px; margin-top: 12px;
-    }
-    #sentencesBox {
-        margin-top: 25px; padding: 15px; background: #fff;
-        border-radius: 8px; border: 1px solid #ddd;
-    }
-    .sentence {
-        padding: 10px; font-size: 18px; margin-bottom: 12px; line-height: 30px;
-    }
-    .correct { color: green; font-weight: bold; }
-    .wrong { color: red; font-weight: bold; }
-    .unclear { color: orange; font-weight: bold; }
-
-    #correctionBox {
-        display: none; margin-top: 10px; padding: 10px; background: #ffecec;
-        color: #b30000; border: 1px solid #ffb3b3; border-radius: 6px; font-size: 16px;
-    }
-
-    #progressBarContainer {
-        width: 100%; height: 12px; background: #ddd;
-        border-radius: 8px; margin-top: 10px;
-    }
-    #progressBar {
-        width: 0%; height: 100%; background: #4caf50; border-radius: 8px;
-    }
-</style>
-</head>
-<body>
-
-<h1>SpeakRight – Pronunciation Trainer</h1>
-
-<textarea id="inputBox" placeholder="Paste your English text here..."></textarea>
-<button id="processBtn">Split Into Sentences</button>
-
-<div id="sentencesBox"></div>
-<div id="correctionBox"></div>
-
-<div id="progressBarContainer"><div id="progressBar"></div></div>
-
-<button id="startSentenceBtn" style="display:none;">Start Reading This Sentence</button>
-
 <script>
-/* ------------------ GLOBALS ------------------ */
+/* SpeakRight improved JS v2
+   - sliding-window DP alignment to match spoken span to the target sentence
+   - single correction speak, cancel previous TTS, wait for retry
+   - safer normalization and punctuation handling
+*/
+
 let sentences = [];
 let currentIndex = 0;
-let recognition;
+let recognition = null;
+let awaitingRetry = false;
 
-/* ------------------ SPLIT SENTENCES ------------------ */
+// normalize text for comparison (keep simple letters + apostrophes/hyphen)
+function normalizeText(s){
+  return String(s || '')
+    .replace(/\u2019/g, "'")
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[^\w'\- ]+/g, '')   // remove punctuation except apostrophes/hyphens
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// Levenshtein distance
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({length: m+1}, () => new Array(n+1).fill(0));
+  for (let i=0;i<=m;i++) dp[i][0] = i;
+  for (let j=0;j<=n;j++) dp[0][j] = j;
+  for (let i=1;i<=m;i++){
+    for (let j=1;j<=n;j++){
+      dp[i][j] = Math.min(
+        dp[i-1][j] + 1,
+        dp[i][j-1] + 1,
+        dp[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1)
+      );
+    }
+  }
+  return dp[m][n];
+}
+
+// DP cost for alignment between targetWords (m) and spokenSlice (n)
+function alignmentCost(targetWords, spokenSlice){
+  const m = targetWords.length, n = spokenSlice.length;
+  // dp(i,j) = cost to align first i of target to first j of spokenSlice
+  const dp = Array.from({length: m+1}, () => new Array(n+1).fill(Infinity));
+  dp[0][0] = 0;
+  for (let i=0;i<=m;i++){
+    for (let j=0;j<=n;j++){
+      if (i < m && j < n) {
+        const cost = levenshtein(targetWords[i], spokenSlice[j]);
+        dp[i+1][j+1] = Math.min(dp[i+1][j+1], dp[i][j] + cost);
+      }
+      if (i < m) {
+        // skip target word (penalty 1)
+        dp[i+1][j] = Math.min(dp[i+1][j], dp[i][j] + 1);
+      }
+      if (j < n) {
+        // extra spoken word (penalty 1)
+        dp[i][j+1] = Math.min(dp[i][j+1], dp[i][j] + 1);
+      }
+    }
+  }
+  return dp[m][n];
+}
+
+// alignWords returning mapping from each target index -> spokenSlice index or null
+function alignWordsGetMapping(targetWords, spokenSlice){
+  const m = targetWords.length, n = spokenSlice.length;
+  // build dp + parent
+  const dp = Array.from({length: m+1}, () => new Array(n+1).fill(Infinity));
+  const parent = Array.from({length: m+1}, () => new Array(n+1).fill(null));
+  dp[0][0] = 0;
+  for (let i=0;i<=m;i++){
+    for (let j=0;j<=n;j++){
+      if (i < m && j < n) {
+        const cost = levenshtein(targetWords[i], spokenSlice[j]);
+        if (dp[i+1][j+1] > dp[i][j] + cost) {
+          dp[i+1][j+1] = dp[i][j] + cost;
+          parent[i+1][j+1] = {i,j,type:'match'};
+        }
+      }
+      if (i < m) {
+        if (dp[i+1][j] > dp[i][j] + 1) {
+          dp[i+1][j] = dp[i][j] + 1;
+          parent[i+1][j] = {i,j,type:'skipTarget'};
+        }
+      }
+      if (j < n) {
+        if (dp[i][j+1] > dp[i][j] + 1) {
+          dp[i][j+1] = dp[i][j] + 1;
+          parent[i][j+1] = {i,j,type:'insertSpoken'};
+        }
+      }
+    }
+  }
+  // backtrack
+  let i = m, j = n;
+  const actions = [];
+  while (i>0 || j>0) {
+    const p = parent[i][j];
+    if (!p) break;
+    actions.push(p);
+    i = p.i; j = p.j;
+  }
+  actions.reverse();
+  const alignment = new Array(m).fill(null);
+  let tIdx = 0, sIdx = 0;
+  for (const a of actions){
+    if (a.type === 'match') {
+      alignment[tIdx] = sIdx;
+      tIdx++; sIdx++;
+    } else if (a.type === 'skipTarget') {
+      tIdx++;
+    } else if (a.type === 'insertSpoken') {
+      sIdx++;
+    }
+  }
+  return alignment;
+}
+
+/* -------------- PROCESS BUTTON -------------- */
 document.getElementById("processBtn").onclick = () => {
-    const text = document.getElementById("inputBox").value.trim();
-    if (!text) return;
-
-    sentences = text.match(/[^.!?]+[.!?]?/g) || [];
-    const box = document.getElementById("sentencesBox");
-    box.innerHTML = "";
-
-    sentences.forEach((s, i) => {
-        box.innerHTML += `<div class="sentence" id="sentence-${i}">${s}</div>`;
-    });
-
-    currentIndex = 0;
-    updateProgress();
-    document.getElementById("startSentenceBtn").style.display = "block";
+  const text = document.getElementById("inputBox").value || '';
+  if (!text.trim()) return;
+  sentences = text.match(/[^.!?]+[.!?]?/g) || [];
+  const box = document.getElementById("sentencesBox");
+  box.innerHTML = '';
+  sentences.forEach((s,i) => box.innerHTML += `<div class="sentence" id="sentence-${i}">${s}</div>`);
+  currentIndex = 0;
+  updateProgress();
+  document.getElementById("startSentenceBtn").style.display = "block";
+  document.getElementById("correctionBox").style.display = "none";
+  awaitingRetry = false;
 };
 
-/* ------------------ START LISTENING ------------------ */
+/* -------------- START LISTENING (auto-eval after stop) -------------- */
 document.getElementById("startSentenceBtn").onclick = () => {
-    startListening();
+  if (awaitingRetry) {
+    // If waiting for retry, allow retry only for that sentence
+    awaitingRetry = false;
+    document.getElementById("correctionBox").style.display = "none";
+  }
+  startListeningForCurrent();
 };
 
-function startListening() {
-    const targetSentence = sentences[currentIndex];
+function startListeningForCurrent(){
+  const target = sentences[currentIndex];
+  if (!target) return alert('No sentence found.');
 
-    if (!("webkitSpeechRecognition" in window)) {
-        alert("Speech recognition not supported on this browser.");
-        return;
+  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    alert('Speech recognition not supported in this browser. Use Chrome (desktop or Android).');
+    return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.continuous = false;
+
+  document.getElementById("startSentenceBtn").innerText = 'Listening… Speak now';
+  recognition.start();
+
+  recognition.onresult = (ev) => {
+    const transcriptRaw = ev.results[0][0].transcript || '';
+    const targetNorm = normalizeText(target);
+    const spokenNorm = normalizeText(transcriptRaw);
+    // Speak a debug message in console
+    console.log('Target:', targetNorm);
+    console.log('Spoken capture:', spokenNorm);
+    evaluateSentence(target, targetNorm, spokenNorm);
+  };
+
+  recognition.onerror = (e) => {
+    console.warn('recognition error', e);
+    document.getElementById("startSentenceBtn").innerText = 'Start Reading This Sentence';
+  };
+
+  recognition.onend = () => {
+    document.getElementById("startSentenceBtn").innerText = 'Start Reading This Sentence';
+  };
+}
+
+/* -------------- EVALUATE SENTENCE WITH SLIDING MATCH -------------- */
+function evaluateSentence(originalSentence, targetNorm, spokenNorm){
+  // Token arrays
+  const targetWords = targetNorm.split(/\s+/).filter(Boolean);
+  const spokenWords = spokenNorm.split(/\s+/).filter(Boolean);
+
+  // If nothing captured, mark unclear
+  if (spokenWords.length === 0) {
+    markAllUnclear();
+    awaitingRetry = true;
+    return;
+  }
+
+  // Find best spoken slice (sliding window) to align with the target
+  // Try window sizes near target length (±3) to handle extras/omissions
+  const n = spokenWords.length;
+  let best = {cost: Infinity, start:0, len: Math.min(n, targetWords.length)};
+  const minLen = Math.max(1, targetWords.length - 3);
+  const maxLen = Math.min(n, targetWords.length + 3);
+  for (let start = 0; start < n; start++){
+    for (let len = minLen; len <= maxLen; len++){
+      if (start + len > n) break;
+      const slice = spokenWords.slice(start, start + len);
+      const cost = alignmentCost(targetWords, slice);
+      if (cost < best.cost) best = {cost, start, len};
     }
+  }
 
-    recognition = new webkitSpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
+  // If best cost is very large relative to target size, treat as poor match
+  if (best.cost === Infinity) {
+    markAllUnclear();
+    awaitingRetry = true;
+    return;
+  }
 
-    recognition.start();
+  const spokenSlice = spokenWords.slice(best.start, best.start + best.len);
+  const mapping = alignWordsGetMapping(targetWords, spokenSlice); // indexes into slice
 
-    document.getElementById("startSentenceBtn").innerText = "Listening… Speak now";
-
-    recognition.onresult = (event) => {
-        const spoken = event.results[0][0].transcript.toLowerCase();
-        evaluateSentence(targetSentence, spoken);
-    };
-
-    recognition.onend = () => {
-        document.getElementById("startSentenceBtn").innerText = "Start Reading This Sentence";
-    };
-}
-
-/* ------------------ EVALUATE ------------------ */
-function evaluateSentence(target, spoken) {
-    const targetWords = target.toLowerCase().split(" ");
-    const spokenWords = spoken.toLowerCase().split(" ");
-
-    let resultHTML = "";
-    let wrongWord = null;
-    let correctPronunciation = null;
-
-    let spokenIndex = 0;
-
-    targetWords.forEach((word) => {
-        const cleanWord = word.replace(/[^a-z]/g, "");
-
-        const spokenMatch = spokenWords[spokenIndex] || "";
-
-        if (spokenMatch === cleanWord) {
-            resultHTML += `<span class='correct'>${word} </span>`;
-            spokenIndex++;
-        }
-        else if (spokenMatch && similarity(cleanWord, spokenMatch) > 0.7) {
-            resultHTML += `<span class='unclear'>${word} </span>`;
-            spokenIndex++;
-        }
-        else {
-            resultHTML += `<span class='wrong'>${word} </span>`;
-            wrongWord = spokenMatch || "(missing)";
-            correctPronunciation = cleanWord;
-        }
-    });
-
-    document.getElementById(`sentence-${currentIndex}`).innerHTML = resultHTML;
-
-    if (wrongWord) {
-        showCorrection(wrongWord, correctPronunciation);
-        speakCorrectWord(correctPronunciation);
-        return;
+  // Build display HTML, determine first wrong
+  let firstWrongIndex = -1;
+  let outHTML = '';
+  for (let i=0;i<targetWords.length;i++){
+    const originalToken = getOriginalToken(originalSentence, i);
+    const spokenIdxInSlice = mapping[i];
+    if (spokenIdxInSlice === null || spokenIdxInSlice === undefined) {
+      outHTML += `<span class="unclear">${escapeHtml(originalToken)} </span>`;
+      if (firstWrongIndex === -1) firstWrongIndex = i;
+      continue;
     }
-
-    moveToNextSentence();
-}
-
-/* ------------------ SIMILARITY CHECK ------------------ */
-function similarity(a, b) {
-    let matches = 0;
-    let length = Math.min(a.length, b.length);
-    for (let i = 0; i < length; i++) {
-        if (a[i] === b[i]) matches++;
+    const spokenWord = spokenSlice[spokenIdxInSlice];
+    const dist = levenshtein(targetWords[i], spokenWord);
+    const threshold = Math.max(1, Math.floor(targetWords[i].length * 0.35));
+    if (dist <= threshold) {
+      outHTML += `<span class="correct">${escapeHtml(originalToken)} </span>`;
+    } else {
+      outHTML += `<span class="wrong">${escapeHtml(originalToken)} </span>`;
+      if (firstWrongIndex === -1) firstWrongIndex = i;
     }
-    return matches / a.length;
+  }
+
+  // Render sentence
+  document.getElementById(`sentence-${currentIndex}`).innerHTML = outHTML;
+
+  if (firstWrongIndex !== -1) {
+    const wrongSpoken = (spokenSlice[mapping[firstWrongIndex]] || '(not detected)');
+    const correctToken = getOriginalToken(originalSentence, firstWrongIndex);
+    showCorrection(wrongSpoken, correctToken);
+    // speak correct once
+    speakCorrectWordOnce(correctToken);
+    // set awaiting retry so user must press Start again (prevents repeated correction while user continues reading)
+    awaitingRetry = true;
+    return;
+  }
+
+  // success -> move on
+  document.getElementById("correctionBox").style.display = 'none';
+  awaitingRetry = false;
+  moveToNextSentence();
 }
 
-/* ------------------ CORRECTION BUBBLE ------------------ */
-function showCorrection(wrong, correctWord) {
-    const box = document.getElementById("correctionBox");
-    box.style.display = "block";
-    box.innerHTML = `You said: <b>${wrong}</b><br>Correct pronunciation: <b>${correctWord}</b>`;
+/* -------------- HELPERS: UI and TTS -------------- */
+function markAllUnclear() {
+  const target = sentences[currentIndex];
+  const words = (target || '').split(/\s+/);
+  const out = words.map(w => `<span class="unclear">${escapeHtml(w)}</span>`).join(' ');
+  document.getElementById(`sentence-${currentIndex}`).innerHTML = out;
+  document.getElementById("correctionBox").style.display = 'block';
+  document.getElementById("correctionBox").innerHTML = 'No speech detected or not understood. Try again.';
 }
 
-/* ------------------ PRONOUNCE WORD ------------------ */
-function speakCorrectWord(word) {
-    const utter = new SpeechSynthesisUtterance(word);
-    utter.voice = speechSynthesis.getVoices().find(v =>
-        v.lang === "en-US" && v.name.toLowerCase().includes("male")
-    ) || speechSynthesis.getVoices()[0];
-    speechSynthesis.speak(utter);
+function showCorrection(spoken, correct) {
+  const box = document.getElementById("correctionBox");
+  box.style.display = 'block';
+  box.innerHTML = `You said: <b>${escapeHtml(spoken)}</b><br>Correct pronunciation: <b>${escapeHtml(correct)}</b>`;
 }
 
-/* ------------------ NEXT SENTENCE ------------------ */
-function moveToNextSentence() {
-    document.getElementById("correctionBox").style.display = "none";
-    currentIndex++;
+function speakCorrectWordOnce(word) {
+  // Cancel previous utterances (prevents repeats)
+  if (speechSynthesis.speaking) speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance(word);
+  // pick likely male US voice, fallback gracefully
+  const voices = speechSynthesis.getVoices();
+  let chosen = voices.find(v => v.lang && v.lang.startsWith('en-US') && /male|man|david|john|daniel|tom/i.test(v.name));
+  if (!chosen) chosen = voices.find(v => v.lang && v.lang.startsWith('en-US'));
+  if (chosen) utt.voice = chosen;
+  utt.rate = 0.95;
+  speechSynthesis.speak(utt);
+}
 
-    if (currentIndex >= sentences.length) {
-        alert("Finished! Great work!");
-        return;
-    }
+// return original token (keeps punctuation/case) or '' if missing
+function getOriginalToken(originalSentence, idx) {
+  const tokens = originalSentence.trim().split(/\s+/);
+  return tokens[idx] || '';
+}
 
+function escapeHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* -------------- NAVIGATION -------------- */
+function moveToNextSentence(){
+  currentIndex++;
+  if (currentIndex >= sentences.length) {
     updateProgress();
+    alert('Finished! Great work!');
+    return;
+  }
+  updateProgress();
+  // scroll to next sentence (mobile friendly)
+  const el = document.getElementById(`sentence-${currentIndex}`);
+  if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
-/* ------------------ PROGRESS BAR ------------------ */
-function updateProgress() {
-    const progress = (currentIndex / sentences.length) * 100;
-    document.getElementById("progressBar").style.width = progress + "%";
+function updateProgress(){
+  const progress = (currentIndex / Math.max(1, sentences.length)) * 100;
+  document.getElementById("progressBar").style.width = progress + '%';
 }
+
+// Expose retry function in case you want a retry button later
+window.retryCurrent = function(){
+  document.getElementById("correctionBox").style.display = 'none';
+  awaitingRetry = false;
+  startListeningForCurrent();
+};
 </script>
-
-</body>
-</html>
