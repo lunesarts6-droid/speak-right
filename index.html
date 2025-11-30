@@ -1,223 +1,273 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>SpeakRight - Pronunciation Trainer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-    body {
-        font-family: Arial, sans-serif;
-        background: #f7f7f7;
-        margin: 0;
-        padding: 20px;
-    }
-    h1 {
-        text-align: center;
-        font-size: 26px;
-        margin-bottom: 20px;
-    }
-    #inputBox {
-        width: 100%;
-        height: 120px;
-        padding: 12px;
-        font-size: 16px;
-        border: 1px solid #bbb;
-        border-radius: 8px;
-        resize: none;
-    }
-    #processBtn, #startSentenceBtn {
-        width: 100%;
-        padding: 14px;
-        background: #000;
-        color: white;
-        font-size: 18px;
-        border: none;
-        border-radius: 8px;
-        margin-top: 12px;
-    }
-    #sentencesBox {
-        margin-top: 25px;
-        padding: 15px;
-        background: #fff;
-        border-radius: 8px;
-        border: 1px solid #ddd;
-    }
-    .sentence {
-        padding: 10px;
-        font-size: 18px;
-        margin-bottom: 12px;
-        line-height: 30px;
-    }
-    .highlight-correct { color: green; font-weight: bold; }
-    .highlight-wrong { color: red; font-weight: bold; }
-    .highlight-unclear { color: orange; font-weight: bold; }
-
-    #correctionBox {
-        display: none;
-        margin-top: 10px;
-        padding: 10px;
-        background: #ffecec;
-        color: #b30000;
-        border: 1px solid #ffb3b3;
-        border-radius: 6px;
-        font-size: 16px;
-    }
-
-    #progressBarContainer {
-        width: 100%;
-        height: 12px;
-        background: #ddd;
-        border-radius: 8px;
-        margin-top: 10px;
-    }
-    #progressBar {
-        width: 0%;
-        height: 100%;
-        background: #4caf50;
-        border-radius: 8px;
-    }
-</style>
-</head>
-<body>
-
-<h1>SpeakRight – Pronunciation Trainer</h1>
-
-<textarea id="inputBox" placeholder="Paste your English text here..."></textarea>
-<button id="processBtn">Split Into Sentences</button>
-
-<div id="sentencesBox"></div>
-
-<div id="correctionBox"></div>
-
-<div id="progressBarContainer"><div id="progressBar"></div></div>
-
-<button id="startSentenceBtn" style="display:none;">Start Reading This Sentence</button>
-
 <script>
-/* ------------------ GLOBALS ------------------ */
+/* Improved SpeakRight JS
+   - fuzzy alignment (Levenshtein-based) for word matching
+   - retry button and better voice selection fallback
+*/
+
 let sentences = [];
 let currentIndex = 0;
 let recognition;
 let isListening = false;
 
-/* ------------------ SPLIT SENTENCES ------------------ */
+// Helper utilities
+function normalizeText(s) {
+  return s
+    .replace(/\u2019/g, "'")
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[^\w\s'-]/g, '') // remove punctuation except apostrophes/hyphens
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// Split into sentences (keeps punctuation to show original)
+function splitIntoSentences(text){
+  return text.match(/[^.!?]+[.!?]?/g) || [];
+}
+
+// Levenshtein distance
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({length: m+1}, () => new Array(n+1).fill(0));
+  for (let i=0;i<=m;i++) dp[i][0] = i;
+  for (let j=0;j<=n;j++) dp[0][j] = j;
+  for (let i=1;i<=m;i++){
+    for (let j=1;j<=n;j++){
+      dp[i][j] = Math.min(
+        dp[i-1][j] + 1,
+        dp[i][j-1] + 1,
+        dp[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1)
+      );
+    }
+  }
+  return dp[m][n];
+}
+
+// Align two word arrays with simple dynamic programming to find best pairing
+function alignWords(targetWords, spokenWords){
+  // build dp table of costs where cost = levenshtein(word_target, word_spoken)
+  const m = targetWords.length, n = spokenWords.length;
+  const dp = Array.from({length: m+1}, () => new Array(n+1).fill(Infinity));
+  const parent = Array.from({length: m+1}, () => new Array(n+1).fill(null));
+  dp[0][0] = 0;
+  for (let i=0;i<=m;i++){
+    for (let j=0;j<=n;j++){
+      if (i < m && j < n) {
+        const cost = levenshtein(targetWords[i], spokenWords[j]);
+        if (dp[i+1][j+1] > dp[i][j] + cost) {
+          dp[i+1][j+1] = dp[i][j] + cost;
+          parent[i+1][j+1] = {i,j,type:'match'};
+        }
+      }
+      if (i < m) {
+        // skip target word (not spoken)
+        if (dp[i+1][j] > dp[i][j] + 1) {
+          dp[i+1][j] = dp[i][j] + 1;
+          parent[i+1][j] = {i,j,type:'skipTarget'};
+        }
+      }
+      if (j < n) {
+        // extra spoken word (insert)
+        if (dp[i][j+1] > dp[i][j] + 1) {
+          dp[i][j+1] = dp[i][j] + 1;
+          parent[i][j+1] = {i,j,type:'insertSpoken'};
+        }
+      }
+    }
+  }
+
+  // backtrack
+  let i = m, j = n;
+  const actions = [];
+  while (i>0 || j>0) {
+    const p = parent[i][j];
+    if (!p) break;
+    actions.push({to:i,j:j, type:p.type, fromI:p.i, fromJ:p.j});
+    i = p.i; j = p.j;
+  }
+  actions.reverse();
+
+  // build alignment array: for each target word, map to spoken word index or null
+  const alignment = new Array(m).fill(null);
+  let tIdx = 0;
+  let sIdx = 0;
+  for (const a of actions){
+    if (a.type === 'match') {
+      alignment[tIdx] = sIdx;
+      tIdx++; sIdx++;
+    } else if (a.type === 'skipTarget') {
+      // target skipped => leave alignment null and advance target
+      tIdx++;
+    } else if (a.type === 'insertSpoken') {
+      // spoken extra => advance spoken
+      sIdx++;
+    }
+  }
+  return alignment;
+}
+
+// UI: process button
 document.getElementById("processBtn").onclick = () => {
-    const text = document.getElementById("inputBox").value.trim();
-    if (!text) return;
-
-    sentences = text.match(/[^.!?]+[.!?]?/g) || [];
-    const box = document.getElementById("sentencesBox");
-    box.innerHTML = "";
-
-    sentences.forEach((s, i) => {
-        box.innerHTML += `<div class="sentence" id="sentence-${i}">${s}</div>`;
-    });
-
-    currentIndex = 0;
-    updateProgress();
-    document.getElementById("startSentenceBtn").style.display = "block";
+  const text = document.getElementById("inputBox").value || '';
+  if (!text.trim()) return;
+  sentences = splitIntoSentences(text);
+  const box = document.getElementById("sentencesBox");
+  box.innerHTML = '';
+  sentences.forEach((s,i) => {
+    box.innerHTML += `<div class="sentence" id="sentence-${i}">${s}</div>`;
+  });
+  currentIndex = 0;
+  updateProgress();
+  document.getElementById("startSentenceBtn").style.display = "block";
+  document.getElementById("correctionBox").style.display = "none";
 };
 
-/* ------------------ START LISTENING ------------------ */
-document.getElementById("startSentenceBtn").onclick = () => {
-    startListeningSentence();
-};
+// Start listening for current sentence
+document.getElementById("startSentenceBtn").onclick = () => startListeningSentence();
 
 function startListeningSentence() {
-    const targetSentence = sentences[currentIndex];
+  const target = sentences[currentIndex];
+  if (!target) return;
 
-    if (!("webkitSpeechRecognition" in window)) {
-        alert("Speech recognition not supported on this browser.");
-        return;
-    }
+  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    alert('Speech recognition not supported in this browser. Use Chrome on desktop or Android for best results.');
+    return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.continuous = false;
 
-    recognition = new webkitSpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.continuous = false;
+  // UI feedback
+  document.getElementById("startSentenceBtn").textContent = 'Listening... (Speak now)';
+  recognition.start();
 
-    recognition.start();
-    isListening = true;
+  recognition.onresult = (ev) => {
+    const spokenRaw = ev.results[0][0].transcript || '';
+    const targetNorm = normalizeText(target);
+    const spokenNorm = normalizeText(spokenRaw);
+    evaluateSentence(target, targetNorm, spokenRaw, spokenNorm);
+  };
 
-    recognition.onresult = (event) => {
-        const spoken = event.results[0][0].transcript.toLowerCase();
-        evaluateSentence(targetSentence, spoken);
-    };
+  recognition.onerror = (e) => {
+    console.error('recognition error', e);
+    document.getElementById("startSentenceBtn").textContent = 'Start Reading This Sentence';
+  };
 
-    recognition.onerror = () => { isListening = false; };
+  recognition.onend = () => {
+    document.getElementById("startSentenceBtn").textContent = 'Start Reading This Sentence';
+  };
 }
 
-/* ------------------ EVALUATE ------------------ */
-function evaluateSentence(target, spoken) {
-    const targetWords = target.toLowerCase().split(" ");
-    const spokenWords = spoken.toLowerCase().split(" ");
+// Evaluate with alignment and thresholds
+function evaluateSentence(originalSentence, targetNorm, spokenRaw, spokenNorm) {
+  const targetWords = targetNorm.split(' ').filter(Boolean);
+  const spokenWords = spokenNorm.split(' ').filter(Boolean);
 
-    let resultHTML = "";
-    let wrongWord = null;
-    let correctPronunciation = null;
+  // alignment: which spoken index corresponds to each target word (or null)
+  const alignment = alignWords(targetWords, spokenWords);
 
-    targetWords.forEach((word, i) => {
-        if (!spokenWords[i]) {
-            resultHTML += `<span class="highlight-unclear">${word} </span>`;
-            return;
-        }
-
-        if (spokenWords[i] === word.replace(/[^a-z]/g, "")) {
-            resultHTML += `<span class="highlight-correct">${word} </span>`;
-        } else {
-            resultHTML += `<span class="highlight-wrong">${word} </span>`;
-            wrongWord = spokenWords[i];
-            correctPronunciation = word;
-        }
-    });
-
-    document.getElementById(`sentence-${currentIndex}`).innerHTML = resultHTML;
-
-    if (wrongWord) {
-        showCorrection(wrongWord, correctPronunciation);
-        speakCorrectWord(correctPronunciation);
-        return;
+  // build result HTML and find first wrong
+  let resultHTML = '';
+  let firstWrongIndex = -1;
+  for (let i=0;i<targetWords.length;i++){
+    const t = targetWords[i];
+    const sIdx = alignment[i];
+    if (sIdx === null || sIdx === undefined) {
+      // not spoken
+      resultHTML += `<span class="highlight-unclear">${escapeHtmlWord(getOriginalToken(originalSentence, i))} </span>`;
+      if (firstWrongIndex === -1) firstWrongIndex = i;
+      continue;
     }
+    const spokenWord = spokenWords[sIdx];
+    const dist = levenshtein(t, spokenWord);
+    const tolerance = Math.max(1, Math.floor(t.length * 0.35));
+    if (dist <= tolerance) {
+      resultHTML += `<span class="highlight-correct">${escapeHtmlWord(getOriginalToken(originalSentence, i))} </span>`;
+    } else {
+      resultHTML += `<span class="highlight-wrong">${escapeHtmlWord(getOriginalToken(originalSentence, i))} </span>`;
+      if (firstWrongIndex === -1) firstWrongIndex = i;
+    }
+  }
 
+  document.getElementById(`sentence-${currentIndex}`).innerHTML = resultHTML;
+
+  if (firstWrongIndex !== -1) {
+    const wrongOriginal = getOriginalToken(originalSentence, firstWrongIndex);
+    showCorrection(spokenNorm.split(' ')[alignment[firstWrongIndex]] || '(not detected)', wrongOriginal);
+    speakCorrectWord(wrongOriginal);
+    // show retry control
+    showRetryButton();
+  } else {
+    // success -> move to next
+    document.getElementById("correctionBox").style.display = 'none';
     moveToNextSentence();
+  }
 }
 
-/* ------------------ CORRECTION BUBBLE ------------------ */
-function showCorrection(wrong, correctWord) {
-    const box = document.getElementById("correctionBox");
-    box.style.display = "block";
-    box.innerHTML = `You said: <b>${wrong}</b><br>Correct pronunciation: <b>${correctWord}</b>`;
+// helper to return the i-th token from the original sentence (keeps punctuation/case)
+function getOriginalToken(originalSentence, tokenIndex) {
+  const tokens = originalSentence.trim().split(/\s+/);
+  return tokens[tokenIndex] || '';
 }
 
-/* ------------------ PRONOUNCE WORD ------------------ */
+function escapeHtmlWord(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// show correction box
+function showCorrection(spoken, correct) {
+  const box = document.getElementById("correctionBox");
+  box.style.display = 'block';
+  box.innerHTML = `You said: <b>${escapeHtmlWord(spoken)}</b><br>Correct pronunciation: <b>${escapeHtmlWord(correct)}</b>`;
+}
+
+// retry: let user rerecord same sentence
+function showRetryButton() {
+  const startBtn = document.getElementById("startSentenceBtn");
+  startBtn.textContent = 'Try Again';
+  // user clicks it to start recognition again
+}
+
+// improved speak correct word: choose a likely male American voice, fallback to default
 function speakCorrectWord(word) {
-    const utter = new SpeechSynthesisUtterance(word);
-    utter.voice = speechSynthesis.getVoices().find(v => 
-        v.lang === "en-US" && v.name.toLowerCase().includes("male")
-    ) || speechSynthesis.getVoices()[0];
-    speechSynthesis.speak(utter);
+  const voices = speechSynthesis.getVoices();
+  // find male-ish American voice heuristically
+  let chosen = voices.find(v => v.lang && v.lang.startsWith('en-US') && /male|man|david|john|daniel|tom/i.test(v.name));
+  if (!chosen) {
+    chosen = voices.find(v => v.lang && v.lang.startsWith('en-US'));
+  }
+  const utter = new SpeechSynthesisUtterance(word);
+  if (chosen) utter.voice = chosen;
+  utter.rate = 0.95;
+  speechSynthesis.speak(utter);
 }
 
-/* ------------------ NEXT SENTENCE ------------------ */
+// next sentence
 function moveToNextSentence() {
-    document.getElementById("correctionBox").style.display = "none";
-    currentIndex++;
-
-    if (currentIndex >= sentences.length) {
-        alert("Finished! Great work!");
-        return;
-    }
-
+  currentIndex++;
+  if (currentIndex >= sentences.length) {
     updateProgress();
+    alert('Finished! Great work!');
+    return;
+  }
+  updateProgress();
+  // auto-scroll to next sentence
+  const el = document.getElementById(`sentence-${currentIndex}`);
+  if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
-/* ------------------ PROGRESS BAR ------------------ */
+// progress bar
 function updateProgress() {
-    const progress = ((currentIndex) / sentences.length) * 100;
-    document.getElementById("progressBar").style.width = progress + "%";
+  const progress = (currentIndex / Math.max(1, sentences.length)) * 100;
+  document.getElementById("progressBar").style.width = progress + '%';
 }
-</script>
 
-</body>
-</html>
+// expose a global retry function (user clicks start button again)
+window.retryCurrent = function() {
+  document.getElementById("startSentenceBtn").textContent = 'Start Reading This Sentence';
+  startListeningSentence();
+};
+</script>
