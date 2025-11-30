@@ -1,128 +1,223 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SpeakRight</title>
-  <style>
+<meta charset="UTF-8">
+<title>SpeakRight - Pronunciation Trainer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
     body {
-      font-family: Arial, sans-serif;
-      background: #eef2f7;
-      margin: 0;
-      padding: 25px;
-      text-align: center;
+        font-family: Arial, sans-serif;
+        background: #f7f7f7;
+        margin: 0;
+        padding: 20px;
+    }
+    h1 {
+        text-align: center;
+        font-size: 26px;
+        margin-bottom: 20px;
+    }
+    #inputBox {
+        width: 100%;
+        height: 120px;
+        padding: 12px;
+        font-size: 16px;
+        border: 1px solid #bbb;
+        border-radius: 8px;
+        resize: none;
+    }
+    #processBtn, #startSentenceBtn {
+        width: 100%;
+        padding: 14px;
+        background: #000;
+        color: white;
+        font-size: 18px;
+        border: none;
+        border-radius: 8px;
+        margin-top: 12px;
+    }
+    #sentencesBox {
+        margin-top: 25px;
+        padding: 15px;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #ddd;
+    }
+    .sentence {
+        padding: 10px;
+        font-size: 18px;
+        margin-bottom: 12px;
+        line-height: 30px;
+    }
+    .highlight-correct { color: green; font-weight: bold; }
+    .highlight-wrong { color: red; font-weight: bold; }
+    .highlight-unclear { color: orange; font-weight: bold; }
+
+    #correctionBox {
+        display: none;
+        margin-top: 10px;
+        padding: 10px;
+        background: #ffecec;
+        color: #b30000;
+        border: 1px solid #ffb3b3;
+        border-radius: 6px;
+        font-size: 16px;
     }
 
-    .container {
-      max-width: 650px;
-      margin: auto;
-      background: #ffffff;
-      padding: 30px;
-      border-radius: 15px;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+    #progressBarContainer {
+        width: 100%;
+        height: 12px;
+        background: #ddd;
+        border-radius: 8px;
+        margin-top: 10px;
     }
-
-    textarea {
-      width: 100%;
-      height: 180px;
-      padding: 15px;
-      font-size: 17px;
-      border-radius: 10px;
-      border: 1px solid #ccc;
-      resize: none;
-      outline: none;
+    #progressBar {
+        width: 0%;
+        height: 100%;
+        background: #4caf50;
+        border-radius: 8px;
     }
-
-    select, button {
-      padding: 12px;
-      margin-top: 12px;
-      width: 100%;
-      font-size: 16px;
-      border-radius: 10px;
-      border: none;
-      cursor: pointer;
-    }
-
-    select {
-      background: #f1f1f1;
-    }
-
-    button {
-      background: #0066ff;
-      color: white;
-      font-weight: bold;
-    }
-
-    button:hover {
-      background: #004acc;
-    }
-
-    .label {
-      text-align: left;
-      font-weight: bold;
-      margin: 10px 0 5px 0;
-      color: #333;
-    }
-
-    #status {
-      margin-top: 20px;
-      font-size: 16px;
-    }
-  </style>
+</style>
 </head>
-
 <body>
 
-  <div class="container">
-    <h1>🎤 SpeakRight</h1>
-    <p>Your AI-powered pronunciation trainer.</p>
+<h1>SpeakRight – Pronunciation Trainer</h1>
 
-    <div class="label">Paste your text here:</div>
-    <textarea id="userText" placeholder="Paste any text for pronunciation…"></textarea>
+<textarea id="inputBox" placeholder="Paste your English text here..."></textarea>
+<button id="processBtn">Split Into Sentences</button>
 
-    <div class="label">Choose voice accent:</div>
-    <select id="voiceSelect">
-      <option value="en-US">🇺🇸 English – US</option>
-      <option value="en-GB">🇬🇧 English – UK</option>
-      <option value="en-AU">🇦🇺 English – Australia</option>
-      <option value="en-CA">🇨🇦 English – Canada</option>
-    </select>
+<div id="sentencesBox"></div>
 
-    <div class="label">Speaking speed:</div>
-    <select id="speedSelect">
-      <option value="0.8">🐢 Slow</option>
-      <option value="1">⚖️ Normal</option>
-      <option value="1.3">🐇 Fast</option>
-    </select>
+<div id="correctionBox"></div>
 
-    <button onclick="startPronunciation()">🔊 Play Pronunciation</button>
+<div id="progressBarContainer"><div id="progressBar"></div></div>
 
-    <p id="status"></p>
-  </div>
+<button id="startSentenceBtn" style="display:none;">Start Reading This Sentence</button>
 
-  <script>
-    function startPronunciation() {
-      const text = document.getElementById("userText").value;
-      const voice = document.getElementById("voiceSelect").value;
-      const speed = document.getElementById("speedSelect").value;
-      const status = document.getElementById("status");
+<script>
+/* ------------------ GLOBALS ------------------ */
+let sentences = [];
+let currentIndex = 0;
+let recognition;
+let isListening = false;
 
-      if (!text.trim()) {
-        status.innerHTML = "⚠️ Please paste some text first.";
-        status.style.color = "red";
+/* ------------------ SPLIT SENTENCES ------------------ */
+document.getElementById("processBtn").onclick = () => {
+    const text = document.getElementById("inputBox").value.trim();
+    if (!text) return;
+
+    sentences = text.match(/[^.!?]+[.!?]?/g) || [];
+    const box = document.getElementById("sentencesBox");
+    box.innerHTML = "";
+
+    sentences.forEach((s, i) => {
+        box.innerHTML += `<div class="sentence" id="sentence-${i}">${s}</div>`;
+    });
+
+    currentIndex = 0;
+    updateProgress();
+    document.getElementById("startSentenceBtn").style.display = "block";
+};
+
+/* ------------------ START LISTENING ------------------ */
+document.getElementById("startSentenceBtn").onclick = () => {
+    startListeningSentence();
+};
+
+function startListeningSentence() {
+    const targetSentence = sentences[currentIndex];
+
+    if (!("webkitSpeechRecognition" in window)) {
+        alert("Speech recognition not supported on this browser.");
         return;
-      }
-
-      status.innerHTML = "🔊 Speaking...";
-      status.style.color = "green";
-
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = voice;
-      utter.rate = parseFloat(speed);
-
-      speechSynthesis.speak(utter);
     }
-  </script>
+
+    recognition = new webkitSpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.continuous = false;
+
+    recognition.start();
+    isListening = true;
+
+    recognition.onresult = (event) => {
+        const spoken = event.results[0][0].transcript.toLowerCase();
+        evaluateSentence(targetSentence, spoken);
+    };
+
+    recognition.onerror = () => { isListening = false; };
+}
+
+/* ------------------ EVALUATE ------------------ */
+function evaluateSentence(target, spoken) {
+    const targetWords = target.toLowerCase().split(" ");
+    const spokenWords = spoken.toLowerCase().split(" ");
+
+    let resultHTML = "";
+    let wrongWord = null;
+    let correctPronunciation = null;
+
+    targetWords.forEach((word, i) => {
+        if (!spokenWords[i]) {
+            resultHTML += `<span class="highlight-unclear">${word} </span>`;
+            return;
+        }
+
+        if (spokenWords[i] === word.replace(/[^a-z]/g, "")) {
+            resultHTML += `<span class="highlight-correct">${word} </span>`;
+        } else {
+            resultHTML += `<span class="highlight-wrong">${word} </span>`;
+            wrongWord = spokenWords[i];
+            correctPronunciation = word;
+        }
+    });
+
+    document.getElementById(`sentence-${currentIndex}`).innerHTML = resultHTML;
+
+    if (wrongWord) {
+        showCorrection(wrongWord, correctPronunciation);
+        speakCorrectWord(correctPronunciation);
+        return;
+    }
+
+    moveToNextSentence();
+}
+
+/* ------------------ CORRECTION BUBBLE ------------------ */
+function showCorrection(wrong, correctWord) {
+    const box = document.getElementById("correctionBox");
+    box.style.display = "block";
+    box.innerHTML = `You said: <b>${wrong}</b><br>Correct pronunciation: <b>${correctWord}</b>`;
+}
+
+/* ------------------ PRONOUNCE WORD ------------------ */
+function speakCorrectWord(word) {
+    const utter = new SpeechSynthesisUtterance(word);
+    utter.voice = speechSynthesis.getVoices().find(v => 
+        v.lang === "en-US" && v.name.toLowerCase().includes("male")
+    ) || speechSynthesis.getVoices()[0];
+    speechSynthesis.speak(utter);
+}
+
+/* ------------------ NEXT SENTENCE ------------------ */
+function moveToNextSentence() {
+    document.getElementById("correctionBox").style.display = "none";
+    currentIndex++;
+
+    if (currentIndex >= sentences.length) {
+        alert("Finished! Great work!");
+        return;
+    }
+
+    updateProgress();
+}
+
+/* ------------------ PROGRESS BAR ------------------ */
+function updateProgress() {
+    const progress = ((currentIndex) / sentences.length) * 100;
+    document.getElementById("progressBar").style.width = progress + "%";
+}
+</script>
 
 </body>
 </html>
