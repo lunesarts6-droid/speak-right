@@ -3,32 +3,43 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>SpeakRight — Pronunciation Trainer (Vosk small model)</title>
+<title>SpeakRight — Pronunciation Trainer (Accent-friendly)</title>
 <meta name="description" content="SpeakRight: paste text, read sentence-by-sentence, get accent-friendly pronunciation corrections with Vosk in-browser."/>
+<link rel="preload" href="/vosk/vosk.wasm" as="fetch" type="application/wasm" crossorigin>
 <style>
-  :root{--bg:#f5f7fb;--card:#fff;--accent:#0a54ff;--good:#1e8f3e;--warn:#ff9800;--bad:#d32f2f;--muted:#55626f;--radius:12px}
-  html,body{height:100%;margin:0;font-family:Inter,system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial}
-  body{background:var(--bg);color:var(--muted);padding:18px;display:flex;justify-content:center}
-  .wrap{width:100%;max-width:940px}
-  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
-  header h1{margin:0;font-size:20px;color:#0b2540}
-  .card{background:var(--card);border-radius:var(--radius);padding:16px;box-shadow:0 6px 18px rgba(10,37,64,0.06)}
-  textarea#inputBox{width:100%;min-height:140px;border-radius:10px;border:1px solid #e6edf6;padding:12px;font-size:15px;resize:vertical}
+  :root{
+    --bg:#f2f6fb; --card:#ffffff; --accent:#4058ff; --good:#1e8f3e; --warn:#e69500; --bad:#d32f2f; --muted:#55626f; --radius:16px;
+    --shadow: 0 12px 36px rgba(20,40,80,0.06);
+  }
+  html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial}
+  body{background:var(--bg);color:var(--muted);padding:20px;display:flex;justify-content:center}
+  .wrap{width:100%;max-width:980px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+  header h1{margin:0;font-size:22px;color:#0b2540}
+  header .meta{font-size:13px;color:#6c7a91}
+  .card{background:var(--card);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+  label{display:block;margin-bottom:8px;font-weight:700;color:#0b2540}
+  textarea#inputBox{width:100%;min-height:150px;border-radius:12px;border:1px solid #e6eefc;padding:12px;font-size:15px;resize:vertical;box-shadow:none}
   .controls{display:grid;grid-template-columns:1fr 160px;gap:12px;margin-top:12px}
-  .btn{background:var(--accent);color:white;border:0;padding:12px;border-radius:10px;font-weight:700;cursor:pointer}
-  .btn.secondary{background:#eef2ff;color:var(--accent);border:1px solid #dbe9ff}
-  #sentencesBox{margin-top:16px;display:block}
-  .sentence{padding:10px 12px;border-radius:10px;margin-bottom:10px;background:linear-gradient(180deg,#fff,#fbfdff);border:1px solid #eff5fa;font-size:16px}
-  .token{display:inline-block;margin:3px 6px 3px 0;padding:4px 6px;border-radius:6px}
-  .token.good{background:#e6f6ea;color:var(--good);font-weight:600}
-  .token.unclear{background:#fff6e6;color:var(--warn);font-weight:600}
-  .token.bad{background:#ffecec;color:var(--bad);font-weight:700;text-decoration:underline}
-  #correctionBox{display:none;margin-top:12px;padding:12px;border-radius:8px;background:#fff7f7;border:1px solid #ffd6d6;color:var(--bad)}
+  .btn{background:var(--accent);color:white;border:0;padding:12px;border-radius:12px;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(64,88,255,0.14)}
+  .btn.secondary{background:#fff;border:1px solid #e6eefc;color:var(--accent);box-shadow:none}
+  .small{font-size:13px;color:#6b7a90}
+  #sentencesBox{margin-top:16px}
+  .sentence{padding:12px;border-radius:12px;margin-bottom:10px;background:linear-gradient(180deg,#fff,#fbfdff);border:1px solid #eef5ff;font-size:16px}
+  .token{display:inline-block;margin:4px 6px 4px 0;padding:5px 8px;border-radius:8px;font-weight:600}
+  .token.good{background:#e9f7ec;color:var(--good)}
+  .token.unclear{background:#fff6e6;color:var(--warn)}
+  .token.bad{background:#fff0f0;color:var(--bad)}
+  #correctionBox{display:none;margin-top:12px;padding:12px;border-radius:10px;background:#fff7f7;border:1px solid #ffd6d6;color:var(--bad)}
   #progressWrap{margin-top:12px}
-  #progressBar{height:12px;background:#e6eef6;border-radius:8px;overflow:hidden}
+  #progressBar{height:12px;background:#eef6ff;border-radius:999px;overflow:hidden}
   #progressFill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent), #58d6b9)}
-  .ad-placeholder{margin-top:12px;padding:12px;border-radius:10px;background:#f3f6ff;text-align:center;color:#5a6f9b;border:1px dashed #dfe9ff}
-  .model-loader{margin-top:12px;padding:10px;background:#fff;border-radius:8px;border:1px solid #eef4ff;color:#234}
+  .ad-placeholder{margin-top:14px;padding:12px;border-radius:10px;background:#f3f6ff;text-align:center;color:#5a6f9b;border:1px dashed #dfe9ff}
+  .model-loader{margin-top:12px;padding:10px;border-radius:10px;background:#fff;border:1px solid #eef4ff;color:#234;display:flex;align-items:center;gap:8px}
+  .loader-dot{width:10px;height:10px;border-radius:50%;background:#dbe9ff;animation:blink 1s infinite;}
+  @keyframes blink{0%{opacity:0.4}50%{opacity:1}100%{opacity:0.4}}
+  footer{margin-top:16px;font-size:13px;color:#98a7bf;display:flex;justify-content:space-between;align-items:center}
+  @media(max-width:700px){.controls{grid-template-columns:1fr 120px}}
 </style>
 </head>
 <body>
@@ -36,21 +47,27 @@
     <header>
       <div>
         <h1>SPEAKRIGHT</h1>
-        <small>Accent-friendly pronunciation trainer — runs in your browser (Vosk).</small>
+        <div class="meta">Accent-friendly sentence-by-sentence pronunciation trainer — load model on Start</div>
       </div>
-      <div class="small">Model: small • Voice: American (male-ish)</div>
+      <div class="meta small">Model: small (18MB) · Voice: American (male-ish fallback)</div>
     </header>
 
     <div class="card">
-      <label for="inputBox" style="font-weight:700;color:#0b2540">Paste your English text</label>
-      <textarea id="inputBox" placeholder="Paste a paragraph or practice sentences here..."></textarea>
+      <label for="inputBox">Paste your practice text (English)</label>
+      <textarea id="inputBox" placeholder="Paste a short paragraph or multiple sentences here..."></textarea>
 
       <div class="controls">
         <button id="processBtn" class="btn">Split Into Sentences</button>
         <button id="clearBtn" class="btn secondary">Clear</button>
       </div>
 
-      <div id="sentencesBox" style="margin-top:14px"></div>
+      <div id="modelLoader" class="model-loader" style="display:none;">
+        <div class="loader-dot"></div>
+        <div id="modelStatus">Model status: not loaded</div>
+      </div>
+
+      <div id="sentencesBox"></div>
+
       <div id="correctionBox"></div>
 
       <div id="progressWrap">
@@ -59,38 +76,41 @@
       </div>
 
       <div style="display:flex;gap:12px;margin-top:12px;">
-        <button id="startBtn" class="btn" style="flex:1;display:none">Start Reading This Sentence</button>
+        <button id="startBtn" class="btn" style="flex:1;display:none">Start Reading This Sentence (Load model)</button>
         <button id="nextBtn" class="btn secondary" style="display:none">Skip / Mark as Done</button>
       </div>
 
-      <div id="modelLoader" class="model-loader">Model status: <span id="modelStatus">not loaded</span></div>
-
-      <div class="ad-placeholder" id="adPlaceholder">Ad placeholder — insert AdSense after approval</div>
-      <div style="margin-top:10px;font-size:13px;color:#6b7a90">Tip: Use Chrome (desktop or Android) for best mic & performance.</div>
+      <div class="ad-placeholder" id="adPlaceholder">Ad placeholder — add AdSense here after approval</div>
+      <div class="small" style="margin-top:10px">Tip: For best mic & performance use Chrome (desktop or Android). iOS Safari has limited microphone/STT support.</div>
     </div>
+
+    <footer>
+      <div>© SpeakRight</div>
+      <div><a href="privacy.html" style="color:inherit;text-decoration:underline">Privacy</a> · <a href="terms.html" style="color:inherit;text-decoration:underline">Terms</a></div>
+    </footer>
   </div>
 
 <script>
 /*
-  Vosk in-browser integration + accent-friendly sentence-by-sentence evaluation.
+  Final SpeakRight — Load-on-Start Vosk (small model) implementation (accent-friendly).
+  IMPORTANT:
+   - Put Vosk runtime files in /vosk/ (vosk.js, vosk.wasm — file names used below)
+   - Put the small model folder at /model-small/
+   - This script loads runtime & model only when user clicks Start.
+   - If Vosk files are missing, the page falls back to show instructions and does not auto-speak text.
 
-  Requirements:
-   - Put Vosk runtime files at /vosk/ (vosk.js, vosk.wasm, worker if needed)
-   - Put the small model files at /model-small/
-   - This script loads the model, records audio via WebAudio, sends PCM to Vosk,
-     receives text (partial/final), then uses sliding-window + Levenshtein alignment
-     to mark tokens correct/unclear/wrong and plays correction once.
-
-  Note: If your vosk runtime or model filenames differ, update paths below.
+  Note: Different Vosk browser builds expose different APIs. This script tries the common worker-style API
+  (Vosk.createWorker / Vosk.createModel). If your vosk.js variant uses a different factory, you may need to adapt two lines:
+   - where createWorker/createModel is called.
 */
 
 (async function(){
-  // Config: update if your files are in different locations
-  const VOSK_JS = '/vosk/vosk.js';        // must exist in repo
-  const VOSK_WASM = '/vosk/vosk.wasm';    // must exist in repo
-  const MODEL_PATH = '/model-small';      // model folder in repo
+  // CONFIG — change paths if you put files elsewhere
+  const VOSK_JS = '/vosk/vosk.js';
+  const VOSK_WASM = '/vosk/vosk.wasm';
+  const MODEL_PATH = '/model-small';
 
-  // UI elements
+  // UI refs
   const inputBox = document.getElementById('inputBox');
   const processBtn = document.getElementById('processBtn');
   const clearBtn = document.getElementById('clearBtn');
@@ -99,6 +119,7 @@
   const progressFill = document.getElementById('progressFill');
   const startBtn = document.getElementById('startBtn');
   const nextBtn = document.getElementById('nextBtn');
+  const modelLoader = document.getElementById('modelLoader');
   const modelStatus = document.getElementById('modelStatus');
 
   // State
@@ -106,91 +127,22 @@
   let currentIndex = 0;
   let awaitingRetry = false;
   let modelReady = false;
-  let recognizer = null;
-  let microphoneStream = null;
+  let voskWorker = null;      // worker or recognizer abstraction
   let audioCtx = null;
-  let sourceNode = null;
-  let processorNode = null;
-  let voskWorker = null;
+  let micStream = null;
+  let processor = null;
 
-  // Load Vosk runtime script dynamically
-  async function loadVoskRuntime(){
-    modelStatus.textContent = 'loading runtime...';
-    await new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = VOSK_JS;
-      s.onload = () => res();
-      s.onerror = (e) => rej(new Error('Failed to load Vosk runtime: ' + e.message));
-      document.head.appendChild(s);
-    });
-    modelStatus.textContent = 'runtime loaded';
-  }
+  // Small helpers
+  function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function normalizeText(s){ return String(s||'').replace(/\u2019/g,"'").replace(/[^\w'\- ]+/g,'').replace(/\s+/g,' ').trim().toLowerCase(); }
+  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-  // Initialize Vosk worker + load model (worker approach is common)
-  async function initVoskModel(){
-    modelStatus.textContent = 'initializing model (this may take a few seconds)...';
-    // Use the Vosk API global (vosk) loaded by vosk.js
-    if (typeof Vosk === 'undefined' && typeof vosk === 'undefined') {
-      // some builds expose "Vosk" others "vosk"
-      modelStatus.textContent = 'Vosk runtime not found';
-      throw new Error('Vosk runtime not found');
-    }
-    const VoskLib = window.Vosk || window.vosk; // whichever is available
-
-    // Create worker using the runtime's createWorker or similar factory
-    // Many vosk-browser builds provide Vosk.createWorker({modelUrl, wasmUrl, ...})
-    // We'll try to use a standard pattern; if your vosk.js exposes a different API adapt accordingly.
-    modelStatus.textContent = 'loading model files...';
-    try {
-      // If your Vosk runtime provides createModel or createWorker
-      if (VoskLib.createModel) {
-        // Some versions: createModel(modelUrl). Then createRecognizer(model)
-        const model = await VoskLib.createModel(MODEL_PATH);
-        recognizer = await model.createRecognizer({model: model, grammar: null});
-      } else if (VoskLib.createWorker) {
-        // create worker-based recognizer (preferred)
-        voskWorker = await VoskLib.createWorker({
-          modelUrl: MODEL_PATH,
-          wasmUrl: VOSK_WASM,
-          // optional: workerUrl: '/vosk/worker.js'
-          // progress callback:
-          onProgress: (p) => modelStatus.textContent = 'model load: ' + Math.round(p*100) + '%'
-        });
-        recognizer = voskWorker; // abstract common name
-      } else {
-        // fallback: try new VoskLib.Model + VoskLib.Recognizer (older API)
-        if (VoskLib.Model) {
-          const model = new VoskLib.Model(MODEL_PATH);
-          recognizer = new VoskLib.Recognizer({model: model, sampleRate: 16000});
-        } else {
-          throw new Error('Unsupported Vosk runtime API in this bundle.');
-        }
-      }
-      modelReady = true;
-      modelStatus.textContent = 'model ready';
-    } catch (err) {
-      modelStatus.textContent = 'model load failed: ' + (err.message || err);
-      console.error('Vosk init error', err);
-      throw err;
-    }
-  }
-
-  // Utility: normalize text for comparison
-  function normalizeText(s){
-    return String(s || '')
-      .replace(/\u2019/g, "'")
-      .replace(/[\u2013\u2014]/g, "-")
-      .replace(/[^\w'\- ]+/g, '')
-      .replace(/\s+/g,' ')
-      .trim()
-      .toLowerCase();
-  }
-
+  // Levenshtein and alignments (same robust algorithm)
   function levenshtein(a,b){
     if(!a) return b.length;
     if(!b) return a.length;
-    const m = a.length, n = b.length;
-    const dp = Array.from({length:m+1}, () => Array(n+1).fill(0));
+    const m=a.length, n=b.length;
+    const dp = Array.from({length:m+1}, ()=>Array(n+1).fill(0));
     for(let i=0;i<=m;i++) dp[i][0]=i;
     for(let j=0;j<=n;j++) dp[0][j]=j;
     for(let i=1;i<=m;i++){
@@ -200,10 +152,9 @@
     }
     return dp[m][n];
   }
-
   function alignmentCost(targetWords, spokenSlice){
-    const m = targetWords.length, n = spokenSlice.length, INF = 1e9;
-    const dp = Array.from({length:m+1}, () => Array(n+1).fill(INF));
+    const m=targetWords.length, n=spokenSlice.length, INF=1e9;
+    const dp=Array.from({length:m+1}, ()=>Array(n+1).fill(INF));
     dp[0][0]=0;
     for(let i=0;i<=m;i++){
       for(let j=0;j<=n;j++){
@@ -211,42 +162,28 @@
           const cost = levenshtein(targetWords[i], spokenSlice[j]);
           if(dp[i+1][j+1] > dp[i][j] + cost) dp[i+1][j+1] = dp[i][j] + cost;
         }
-        if(i<m){
-          if(dp[i+1][j] > dp[i][j] + 1) dp[i+1][j] = dp[i][j] + 1;
-        }
-        if(j<n){
-          if(dp[i][j+1] > dp[i][j] + 1) dp[i][j+1] = dp[i][j] + 1;
-        }
+        if(i<m) if(dp[i+1][j] > dp[i][j] + 1) dp[i+1][j] = dp[i][j] + 1;
+        if(j<n) if(dp[i][j+1] > dp[i][j] + 1) dp[i][j+1] = dp[i][j] + 1;
       }
     }
     return dp[m][n];
   }
-
   function alignWordsGetMapping(targetWords, spokenSlice){
-    const m = targetWords.length, n = spokenSlice.length, INF = 1e9;
-    const dp = Array.from({length:m+1}, () => Array(n+1).fill(INF));
-    const parent = Array.from({length:m+1}, () => Array(n+1).fill(null));
+    const m=targetWords.length, n=spokenSlice.length, INF=1e9;
+    const dp=Array.from({length:m+1}, ()=>Array(n+1).fill(INF));
+    const parent=Array.from({length:m+1}, ()=>Array(n+1).fill(null));
     dp[0][0]=0;
     for(let i=0;i<=m;i++){
       for(let j=0;j<=n;j++){
         if(i<m && j<n){
-          const cost = levenshtein(targetWords[i], spokenSlice[j]);
-          if(dp[i+1][j+1] > dp[i][j] + cost){
-            dp[i+1][j+1] = dp[i][j] + cost;
-            parent[i+1][j+1] = {i,j,type:'match'};
-          }
+          const cost=levenshtein(targetWords[i], spokenSlice[j]);
+          if(dp[i+1][j+1] > dp[i][j] + cost){ dp[i+1][j+1] = dp[i][j] + cost; parent[i+1][j+1] = {i,j,type:'match'}; }
         }
         if(i<m){
-          if(dp[i+1][j] > dp[i][j] + 1){
-            dp[i+1][j] = dp[i][j] + 1;
-            parent[i+1][j] = {i,j,type:'skipTarget'};
-          }
+          if(dp[i+1][j] > dp[i][j] + 1){ dp[i+1][j] = dp[i][j] + 1; parent[i+1][j] = {i,j,type:'skipTarget'}; }
         }
         if(j<n){
-          if(dp[i][j+1] > dp[i][j] + 1){
-            dp[i][j+1] = dp[i][j] + 1;
-            parent[i][j+1] = {i,j,type:'insertSpoken'};
-          }
+          if(dp[i][j+1] > dp[i][j] + 1){ dp[i][j+1] = dp[i][j] + 1; parent[i][j+1] = {i,j,type:'insertSpoken'}; }
         }
       }
     }
@@ -268,19 +205,18 @@
     return alignment;
   }
 
-  // Render sentences into the DOM
+  // Render sentences
   function renderSentences(){
     sentencesBox.innerHTML = '';
-    sentences.forEach((s,i) => {
+    sentences.forEach((s,i)=>{
       sentencesBox.insertAdjacentHTML('beforeend', `<div class="sentence" id="sentence-${i}">${escapeHtml(s)}</div>`);
     });
   }
-  function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
   // Buttons
   processBtn.addEventListener('click', ()=>{
     const text = inputBox.value || '';
-    if(!text.trim()) return alert('Please paste text first.');
+    if(!text.trim()) return alert('Please paste some text first.');
     sentences = text.match(/[^.!?]+[.!?]?/g) || [];
     currentIndex = 0;
     renderSentences();
@@ -292,165 +228,222 @@
   });
 
   clearBtn.addEventListener('click', ()=>{
-    inputBox.value = '';
-    sentences = [];
-    sentencesBox.innerHTML = '';
-    startBtn.style.display = 'none';
-    nextBtn.style.display = 'none';
-    correctionBox.style.display = 'none';
-    progressFill.style.width = '0%';
+    inputBox.value='';
+    sentences=[];
+    sentencesBox.innerHTML='';
+    startBtn.style.display='none';
+    nextBtn.style.display='none';
+    correctionBox.style.display='none';
+    progressFill.style.width='0%';
   });
 
   nextBtn.addEventListener('click', ()=>{ moveToNextSentence(); });
 
-  // Start listening (this uses WebAudio + Vosk worker)
-  async function startListeningForCurrent(){
+  // START: load runtime + model on demand, then record & send audio to model
+  startBtn.addEventListener('click', async ()=>{
     if (!modelReady){
-      alert('Model not ready yet. Wait until "model status" shows ready.');
-      return;
-    }
-    if(!sentences.length) return alert('No sentences. Paste text and click split.');
-    const target = sentences[currentIndex];
-    if(!target) return;
-
-    // ask for microphone
-    try {
-      microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (e) {
-      return alert('Microphone permission denied or not available.');
-    }
-
-    // create WebAudio context and capture PCM frames at 16kHz
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    sourceNode = audioCtx.createMediaStreamSource(microphoneStream);
-
-    // create processor (script processor has wide support)
-    // buffer size 4096 is okay; we convert from audioCtx.sampleRate -> 16000
-    const bufferSize = 4096;
-    processorNode = audioCtx.createScriptProcessor(bufferSize, 1, 1);
-
-    // Prepare conversion parameters
-    const inputSampleRate = audioCtx.sampleRate;
-    const targetRate = 16000;
-
-    // Start sending audio chunks to Vosk worker/recognizer
-    processorNode.onaudioprocess = (e) => {
-      const inputData = e.inputBuffer.getChannelData(0);
-      // downsample to 16k
-      const down = downsampleBuffer(inputData, inputSampleRate, targetRate);
-      // convert to Int16
-      const int16 = floatTo16BitPCM(down);
-      // send to recognizer API
+      // load runtime & model now (load-on-start)
+      modelLoader.style.display = 'flex';
+      modelStatus.textContent = 'Loading runtime...';
       try {
-        if (voskWorker && typeof voskWorker.postMessage === 'function') {
-          // worker API: post PCM -> {cmd: 'process', data: ...} or custom; check your vosk.worker API.
-          // Many createWorker abstractions expose 'send' or 'post' functions; try common ones:
-          if (voskWorker.send) voskWorker.send({cmd:'process',buffer:int16});
-          else if (voskWorker.postMessage) voskWorker.postMessage({cmd:'process',buffer:int16});
-          else if (recognizer && recognizer.acceptWaveform) recognizer.acceptWaveform(int16);
-        } else if (recognizer && recognizer.acceptWaveform) {
-          recognizer.acceptWaveform(int16);
-        }
+        await loadVoskRuntime();            // loads vosk.js
+        modelStatus.textContent = 'Runtime loaded. Loading model...';
+        await initVoskModel();              // createWorker / model init
+        modelStatus.textContent = 'Model ready';
+        modelReady = true;
       } catch(err){
-        console.error('send audio error', err);
-      }
-    };
-
-    // connect nodes
-    sourceNode.connect(processorNode);
-    processorNode.connect(audioCtx.destination);
-
-    // Start a short listener: accumulate audio for ~2.5s or until silence
-    // We'll collect final transcript from recognizer after stopping.
-    modelStatus.textContent = 'Recording... speak the sentence clearly and pause.';
-    // simple timer to capture about 3 seconds; you can extend for longer sentences
-    await sleep(2500); // record ~2.5s
-    stopRecordingAndProcess(target);
-  }
-
-  // Stop audio capture and ask the model for recognition result
-  async function stopRecordingAndProcess(originalSentence){
-    // disconnect audio nodes
-    if (processorNode) { processorNode.disconnect(); processorNode.onaudioprocess = null; processorNode = null; }
-    if (sourceNode) { try{ sourceNode.disconnect(); }catch(e){} sourceNode = null; }
-    try { if (audioCtx) await audioCtx.close(); } catch(e){}
-    audioCtx = null;
-
-    // stop mic permission stream tracks
-    if (microphoneStream) {
-      microphoneStream.getTracks().forEach(t => t.stop());
-      microphoneStream = null;
-    }
-
-    modelStatus.textContent = 'Processing audio with model...';
-
-    // Ask recognizer or worker for final result
-    // Support multiple runtimes: worker-based or direct recognizer
-    try {
-      let finalText = '';
-      if (voskWorker && voskWorker.getResult) {
-        // some worker wrappers have getResult()
-        const res = await voskWorker.getResult();
-        finalText = res.text || '';
-      } else if (voskWorker && voskWorker.postMessage) {
-        // If worker expects message, we send finish and wait for response; implement simple promise
-        finalText = await sendFinishToWorkerAndGetResult();
-      } else if (recognizer && recognizer.finalResult) {
-        const r = await recognizer.finalResult();
-        finalText = r.text || '';
-      } else if (recognizer && recognizer.getResult) {
-        const r = await recognizer.getResult();
-        finalText = r.text || '';
-      } else {
-        console.warn('No standard result API found on recognizer/worker; trying to read partial via recognizer.result');
-        if (recognizer && recognizer.result) {
-          finalText = recognizer.result;
-        }
-      }
-
-      modelStatus.textContent = 'Model result ready';
-      console.log('Final recognized text:', finalText);
-      if (!finalText) {
-        markAllUnclear();
-        awaitingRetry = true;
+        console.error('Vosk init failed', err);
+        modelStatus.textContent = 'Model load failed — check vosk files in /vosk and /model-small';
+        alert('Model could not be loaded. Check console and ensure vosk files are uploaded (vosk.js, vosk.wasm, model folder).');
         return;
+      } finally {
+        await sleep(400);
+        modelLoader.style.display = modelReady ? 'none' : 'flex';
       }
-      // Evaluate the recognized finalText against original sentence
-      handleRecognitionResult(originalSentence, finalText.toLowerCase());
-    } catch (err) {
-      console.error('recognition final error', err);
-      modelStatus.textContent = 'Recognition failed';
-      markAllUnclear();
-      awaitingRetry = true;
     }
-  }
+    // If awaiting retry, hide correction and allow retry
+    if (awaitingRetry){
+      correctionBox.style.display = 'none';
+      awaitingRetry = false;
+    }
+    // Record audio, send to Vosk, get result, evaluate.
+    await recordAndProcessSentence();
+  });
 
-  // If worker communicates via messages we need this helper: sends finish and wait for response
-  function sendFinishToWorkerAndGetResult(){
-    return new Promise((resolve, reject) => {
-      // this duck-typing assumes worker will postMessage({cmd:'result', text:...})
-      // Implement a one-time message listener
-      const handler = (e) => {
-        try {
-          const d = e.data || {};
-          if (d && (d.cmd === 'result' || d.result)) {
-            window.removeEventListener('message', handler);
-            resolve(d.text || d.result || '');
-          }
-        } catch(e){}
-      };
-      window.addEventListener('message', handler);
-      // send finish
-      try {
-        if (voskWorker && voskWorker.postMessage) voskWorker.postMessage({cmd:'finish'});
-        else reject(new Error('vosk worker not postMessage'));
-      } catch(e){ reject(e); }
-      // timeout if no response
-      setTimeout(()=>{ window.removeEventListener('message', handler); resolve(''); }, 4000);
+  // Load Vosk runtime script
+  function loadVoskRuntime(){
+    return new Promise((resolve,reject)=>{
+      // don't load twice
+      if (window.Vosk || window.vosk) return resolve();
+      const s = document.createElement('script');
+      s.src = VOSK_JS;
+      s.onload = ()=>resolve();
+      s.onerror = (e)=>reject(new Error('Failed to load Vosk runtime: ' + e.message));
+      document.head.appendChild(s);
     });
   }
 
-  // handle recognized text -> alignment -> highlight -> correction
+  // Create worker/model using common patterns. If your vosk build differs, adapt here.
+  async function initVoskModel(){
+    // Expose name differences
+    const VoskLib = window.Vosk || window.vosk || window.vosk$;
+    if (!VoskLib){
+      throw new Error('Vosk runtime not found after loading vosk.js');
+    }
+
+    // Many recent bundles offer createWorker({modelUrl, wasmUrl, onProgress})
+    if (typeof VoskLib.createWorker === 'function'){
+      voskWorker = await VoskLib.createWorker({
+        modelUrl: MODEL_PATH,
+        wasmUrl: VOSK_WASM,
+        onProgress: (p) => { modelStatus.textContent = 'Model load ' + Math.round(p*100) + '%'; }
+      });
+      return;
+    }
+
+    // Some builds expose createModel / Model/Recognizer constructors (older)
+    if (typeof VoskLib.createModel === 'function'){
+      const model = await VoskLib.createModel(MODEL_PATH);
+      // create recognizer or worker wrapper
+      if (model.createRecognizer) {
+        // some wrappers: model.createRecognizer({sampleRate:16000})
+        voskWorker = await model.createRecognizer({sampleRate:16000});
+      } else {
+        // set voskWorker to model for later calls (duck typing)
+        voskWorker = model;
+      }
+      return;
+    }
+
+    // fallback: error
+    throw new Error('Unsupported Vosk runtime API in vosk.js — update vosk script or adapt initVoskModel.');
+  }
+
+  // RECORD & PROCESS: capture ~2.5s audio and ask recognizer for text
+  async function recordAndProcessSentence(){
+    if (!sentences.length) { alert('No sentences to read. Paste text and split into sentences.'); return; }
+    const target = sentences[currentIndex];
+    if (!target) return;
+
+    // ask mic
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    } catch (err){
+      alert('Microphone access denied or unavailable.');
+      return;
+    }
+
+    // create audio context
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(stream);
+    // ScriptProcessor to read raw audio
+    const bufferSize = 4096;
+    processor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+
+    // Accumulate audio buffers
+    const recorded = [];
+    processor.onaudioprocess = (e) => {
+      const ch = e.inputBuffer.getChannelData(0);
+      recorded.push(new Float32Array(ch));
+    };
+
+    // connect nodes and start
+    source.connect(processor);
+    processor.connect(audioCtx.destination);
+
+    modelStatus.textContent = 'Recording... (speak clearly and pause)';
+    // record for ~2800ms (adjustable)
+    await sleep(2800);
+
+    // stop and cleanup audio nodes
+    processor.disconnect();
+    try { source.disconnect(); } catch(e){}
+    try { audioCtx.close(); } catch(e){}
+    audioCtx = null;
+
+    // concatenate buffers to one float32
+    let totalLen = recorded.reduce((s,b)=>s+b.length,0);
+    const merged = new Float32Array(totalLen);
+    let offset=0;
+    for (const buf of recorded){ merged.set(buf, offset); offset += buf.length; }
+
+    // downsample to 16k
+    const down = downsampleBuffer(merged,  (audioCtx && audioCtx.sampleRate) || 48000, 16000);
+    const int16 = floatTo16BitPCM(down);
+
+    modelStatus.textContent = 'Processing audio...';
+    // send to voskWorker (duck-typed)
+    let finalText = '';
+    try {
+      if (voskWorker && typeof voskWorker.postMessage === 'function'){
+        // worker wrapper: send PCM and request final
+        // Many createWorker wrappers accept messages {cmd:'process',buffer:...} etc.
+        // We'll attempt common approach: post 'process' and then 'finish' -> listen to window message
+        // Simpler: if createWorker returned object with 'feed'/'result' methods adapt here.
+        if (voskWorker.feed) {
+          // some wrappers: feed(Int16Array) then getFinalResult()
+          voskWorker.feed(int16);
+          const res = await voskWorker.getFinalResult();
+          finalText = res && (res.text || res);
+        } else if (voskWorker.acceptWaveform) {
+          // older style recognizer: acceptWaveform(Int16Array), then finalResult()
+          voskWorker.acceptWaveform(int16);
+          const r = await (voskWorker.finalResult ? voskWorker.finalResult() : voskWorker.getResult());
+          finalText = r && (r.text || r);
+        } else if (voskWorker.postMessage) {
+          // try worker messaging pattern
+          // send process
+          const result = await postToVoskWorkerAndGetResult(int16);
+          finalText = result || '';
+        } else {
+          console.warn('Unknown voskWorker API:', typeof voskWorker);
+        }
+      } else if (voskWorker && voskWorker.finalResult) {
+        // direct recognizer API
+        const r = await voskWorker.finalResult(int16);
+        finalText = r && (r.text || r);
+      }
+    } catch (err){
+      console.error('Vosk processing error', err);
+    }
+
+    modelStatus.textContent = 'Model result ready';
+    console.log('Vosk result:', finalText);
+    if (!finalText) {
+      markAllUnclear();
+      awaitingRetry = true;
+      return;
+    }
+    handleRecognitionResult(target, finalText.toLowerCase());
+  }
+
+  // If worker uses postMessage pattern, try to send and get result (best-effort generic)
+  function postToVoskWorkerAndGetResult(int16) {
+    return new Promise((resolve,reject) => {
+      // create a message channel (works when worker uses postMessage to window)
+      // This is a generic, not guaranteed approach; most createWorker wrappers provide convenience methods.
+      try {
+        const onMsg = (e) => {
+          try {
+            const d = e.data || {};
+            if (d && (d.result || d.text || d.cmd === 'result')) {
+              window.removeEventListener('message', onMsg);
+              resolve(d.text || d.result || '');
+            }
+          } catch(e){}
+        };
+        window.addEventListener('message', onMsg);
+        if (voskWorker && voskWorker.postMessage) voskWorker.postMessage({cmd:'process', buffer:int16});
+        // finish
+        setTimeout(()=>{ if (voskWorker && voskWorker.postMessage) voskWorker.postMessage({cmd:'finish'}); }, 50);
+        // fallback timeout
+        setTimeout(()=>{ window.removeEventListener('message', onMsg); resolve(''); }, 5000);
+      } catch(e){ reject(e); }
+    });
+  }
+
+  // handle recognized text -> align -> highlight -> correct
   function handleRecognitionResult(originalSentence, spokenRaw){
     const targetNorm = normalizeText(originalSentence);
     const spokenNorm = normalizeText(spokenRaw);
@@ -462,7 +455,7 @@
 
     if (!spokenWords.length) { markAllUnclear(); awaitingRetry = true; return; }
 
-    // sliding-window best slice
+    // sliding-window
     const n = spokenWords.length;
     let best = {cost: Infinity, start:0, len: Math.min(n, targetWords.length)};
     const minLen = Math.max(1, targetWords.length - 4);
@@ -480,7 +473,6 @@
     const spokenSlice = spokenWords.slice(best.start, best.start + best.len);
     const mapping = alignWordsGetMapping(targetWords, spokenSlice);
 
-    // build out and determine first wrong
     let firstWrongIndex = -1;
     let outHTML = '';
     for (let i=0;i<targetWords.length;i++){
@@ -510,7 +502,7 @@
       return;
     }
 
-    // success
+    // success -> advance
     correctionBox.style.display = 'none';
     awaitingRetry = false;
     moveToNextSentence();
@@ -526,9 +518,9 @@
     correctionBox.textContent = 'No speech detected or not understood. Please try again.';
   }
 
-  function showCorrection(spoken, correctWord){
+  function showCorrection(spoken, correct){
     correctionBox.style.display = 'block';
-    correctionBox.innerHTML = `You said: <b>${escapeHtml(spoken)}</b><br>Correct: <b>${escapeHtml(correctWord)}</b>`;
+    correctionBox.innerHTML = `You said: <b>${escapeHtml(spoken)}</b><br>Correct: <b>${escapeHtml(correct)}</b>`;
   }
 
   function speakCorrectWordOnce(word){
@@ -542,91 +534,45 @@
     speechSynthesis.speak(utt);
   }
 
-  function getOriginalToken(originalSentence, idx){
-    const tokens = originalSentence.trim().split(/\s+/);
-    return tokens[idx] || '';
-  }
+  function getOriginalToken(original, idx){ const tokens = original.trim().split(/\s+/); return tokens[idx] || ''; }
+  function moveToNextSentence(){ currentIndex++; if (currentIndex >= sentences.length){ updateProgress(); alert('Finished — great job!'); return; } updateProgress(); const el=document.getElementById(`sentence-${currentIndex}`); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
+  function updateProgress(){ const pct = Math.round((currentIndex / Math.max(1, sentences.length)) * 100); progressFill.style.width = pct + '%'; }
 
-  function moveToNextSentence(){
-    currentIndex++;
-    if (currentIndex >= sentences.length){
-      updateProgress();
-      alert('Finished all sentences — great job!');
-      return;
-    }
-    updateProgress();
-    const el = document.getElementById(`sentence-${currentIndex}`);
-    if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
-  }
-
-  function updateProgress(){
-    const pct = Math.round((currentIndex / Math.max(1, sentences.length)) * 100);
-    progressFill.style.width = pct + '%';
-  }
-
-  // helpers: downsample float32 to targetRate 16000 and convert to Int16
-  function downsampleBuffer(buffer, sampleRate, outSampleRate) {
+  // helpers for PCM conversion
+  function downsampleBuffer(buffer, sampleRate, outSampleRate){
     if (outSampleRate === sampleRate) return buffer;
     const ratio = sampleRate / outSampleRate;
     const outLength = Math.round(buffer.length / ratio);
     const out = new Float32Array(outLength);
-    let offsetResult = 0;
-    let offsetBuffer = 0;
-    while (offsetResult < outLength) {
+    let offsetResult = 0, offsetBuffer = 0;
+    while (offsetResult < outLength){
       const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
-      // average the samples in between
-      let accum = 0, count = 0;
-      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
-        accum += buffer[i];
-        count++;
-      }
-      out[offsetResult] = count > 0 ? accum / count : 0;
-      offsetResult++;
-      offsetBuffer = nextOffsetBuffer;
+      let accum=0, count=0;
+      for (let i=offsetBuffer; i<nextOffsetBuffer && i<buffer.length; i++){ accum += buffer[i]; count++; }
+      out[offsetResult] = count>0 ? accum/count : 0;
+      offsetResult++; offsetBuffer = nextOffsetBuffer;
     }
     return out;
   }
-  function floatTo16BitPCM(float32Array) {
+  function floatTo16BitPCM(float32Array){
     const l = float32Array.length;
     const buffer = new Int16Array(l);
-    for (let i = 0; i < l; i++) {
+    for (let i=0;i<l;i++){
       let s = Math.max(-1, Math.min(1, float32Array[i]));
       buffer[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     }
     return buffer;
   }
-  function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
-  // Initialize: load runtime + model automatically but non-blocking
-  (async function bootstrap(){
-    try {
-      await loadVoskRuntime();          // loads vosk.js
-      modelStatus.textContent = 'runtime loaded, loading model...';
-      await initVoskModel();            // loads model into worker/recognizer
-      modelStatus.textContent = 'model ready';
-    } catch (err) {
-      console.error('Vosk init failed', err);
-      modelStatus.textContent = 'model load failed';
-    }
-  })();
+  // support: generic post to worker helper is above (postToVoskWorkerAndGetResult)
+  // but for many createWorker wrappers, we used voskWorker.feed/getFinalResult etc.
+  // NOTE: different vosk.js builds use different APIs; if your build exposes different methods,
+  // adapt initVoskModel and recordAndProcessSentence accordingly.
 
-  // expose start function for UI: starts listening and records 2.5s then processes
-  window.startListeningForCurrent = startListeningForCurrent;
+  // Minimal polling to reveal Start button once modelReady if user uploaded model earlier
+  const modelPoll = setInterval(()=>{ if (modelReady){ startBtn.style.display='inline-block'; nextBtn.style.display='inline-block'; clearInterval(modelPoll); } }, 800);
 
-  // initial UI hide
-  startBtn.style.display = 'none';
-  nextBtn.style.display = 'none';
-
-  // show start/next when model ready (poll)
-  const waitForReady = setInterval(()=>{
-    if (modelReady) {
-      startBtn.style.display = 'inline-block';
-      nextBtn.style.display = 'inline-block';
-      clearInterval(waitForReady);
-    }
-  }, 500);
-
-})(); // end iife
+})(); // end IIFE
 </script>
 </body>
 </html>
