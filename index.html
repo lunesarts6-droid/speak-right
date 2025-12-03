@@ -1,175 +1,451 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>SpeakRight - Pronunciation Trainer</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SpeakRight — Live Pronunciation Trainer</title>
+<meta name="description" content="SpeakRight: paste text, read word-by-word, see mistakes, record & playback" />
 <style>
-    body {
-        font-family: Arial, sans-serif;
-        margin: 20px;
-        background: #f5f5f5;
-    }
-    #textInput {
-        width: 100%;
-        height: 120px;
-        font-size: 16px;
-    }
-    #output {
-        font-size: 22px;
-        line-height: 40px;
-        margin-top: 20px;
-        padding: 10px;
-        background: #fff;
-        border-radius: 10px;
-    }
-    .word {
-        padding: 3px 6px;
-        border-radius: 6px;
-    }
-    .correct {
-        background: #b5ffb5;
-    }
-    .wrong {
-        background: #ffb5b5;
-    }
-    button {
-        padding: 12px 20px;
-        margin-top: 10px;
-        font-size: 18px;
-    }
+  :root{
+    --bg:#f4f7fb; --card:#fff; --accent:#2f56ff; --good:#1e8f3e; --warn:#e69500; --bad:#d32f2f; --muted:#51627a; --radius:12px;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--muted)}
+  .wrap{max-width:980px;margin:20px auto;padding:18px}
+  h1{margin:0 0 6px 0;color:#0d2a4a}
+  .card{background:var(--card);border-radius:var(--radius);padding:16px;box-shadow:0 10px 30px rgba(20,40,80,0.06)}
+  label{font-weight:700;color:#0b2540;display:block;margin-bottom:8px}
+  textarea#inputBox{width:100%;min-height:140px;padding:12px;border-radius:10px;border:1px solid #e6eefc;font-size:15px;resize:vertical}
+  .controls{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .btn{background:var(--accent);color:white;border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
+  .btn.secondary{background:#fff;border:1px solid #e6eefc;color:var(--accent)}
+  .status{margin-top:10px;font-size:13px;color:#6b7a90}
+  #output{margin-top:14px;padding:12px;border-radius:12px;background:linear-gradient(#fff,#fbfdff);border:1px solid #eaf1ff;min-height:80px}
+  .token{display:inline-block;margin:6px 8px 6px 0;padding:6px 8px;border-radius:8px;font-weight:600}
+  .token.pending{background:#f1f6ff;color:#2b4d9f}
+  .token.good{background:#e8f9ec;color:var(--good)}
+  .token.bad{background:#fff0f0;color:var(--bad)}
+  .token.unclear{background:#fff7e6;color:var(--warn)}
+  .controls-bottom{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+  .mistakes{margin-top:14px;padding:12px;border-radius:10px;background:#fff;border:1px solid #ffeaea}
+  .mistakes h3{margin:0 0 8px 0}
+  .mistake-item{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #fff5f5}
+  .mistake-item:last-child{border-bottom:0}
+  .audio-controls{margin-top:10px;display:flex;gap:10px;align-items:center}
+  .small{font-size:13px;color:#77879a}
+  .note{font-size:13px;color:#98a7bf;margin-top:10px}
+  @media(max-width:700px){ .controls{flex-direction:column} .controls-bottom{flex-direction:column;align-items:stretch} }
 </style>
 </head>
 <body>
+  <div class="wrap">
+    <h1>SpeakRight — Live Pronunciation Trainer</h1>
+    <div class="card">
+      <label for="inputBox">Paste your English text (short paragraph or sentences)</label>
+      <textarea id="inputBox" placeholder="Paste 1–3 short sentences for best results..."></textarea>
 
-<h2>SpeakRight – Live Pronunciation Checker</h2>
+      <div class="controls">
+        <button id="prepareBtn" class="btn">Prepare Text</button>
+        <button id="startBtn" class="btn secondary">Start Reading (records automatically)</button>
+        <button id="stopBtn" class="btn secondary" disabled>Stop</button>
+        <button id="resetBtn" class="btn secondary">Reset</button>
+      </div>
 
-<textarea id="textInput" placeholder="Paste your text here..."></textarea>
-<br>
-<button onclick="prepareText()">Prepare Text</button>
-<button onclick="startReading()">Start Reading</button>
-<button onclick="stopReading()">Stop</button>
+      <div class="status small" id="status">Status: Ready</div>
 
-<div id="output"></div>
+      <div id="output" aria-live="polite"></div>
+
+      <div class="controls-bottom">
+        <div class="audio-controls">
+          <button id="playRecording" class="btn secondary" disabled>Play Recording</button>
+          <button id="downloadRecording" class="btn secondary" disabled>Download Recording</button>
+        </div>
+        <div style="flex:1"></div>
+        <div class="small">Tip: Use Chrome (desktop or Android) for best speech recognition quality.</div>
+      </div>
+
+      <div class="mistakes" id="mistakesBox" style="display:none">
+        <h3>Collected mistakes</h3>
+        <div id="mistakesList"></div>
+      </div>
+
+      <div class="note">When a word is mispronounced the correct pronunciation will be spoken once. You can re-read the same word until it turns green.</div>
+    </div>
+  </div>
 
 <script>
-let words = [];
-let currentIndex = 0;
-let recognition;
+/* SpeakRight vFinal
+   - Word-by-word checking, only one target word at a time
+   - Collect mistakes list
+   - Record full session via MediaRecorder for playback/download
+   - Speak correct pronunciation once on mistake
+   - Works with Web Speech API (webkitSpeechRecognition or SpeechRecognition)
+*/
 
-function prepareText() {
-    const text = document.getElementById("textInput").value.trim();
-    if (!text) {
-        alert("Paste some text first!");
-        return;
+(() => {
+  // DOM
+  const inputBox = document.getElementById('inputBox');
+  const prepareBtn = document.getElementById('prepareBtn');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const statusEl = document.getElementById('status');
+  const output = document.getElementById('output');
+  const mistakesBox = document.getElementById('mistakesBox');
+  const mistakesList = document.getElementById('mistakesList');
+  const playRecording = document.getElementById('playRecording');
+  const downloadRecording = document.getElementById('downloadRecording');
+
+  // State
+  let tokens = [];            // original tokens (strings)
+  let currentIndex = 0;       // which token we're on
+  let recognition = null;
+  let recorder = null;
+  let chunks = [];
+  let audioURL = null;
+  let collecting = false;
+  let processedSpokenCount = 0;
+  let mistakes = []; // {index, expected, spoken}
+
+  // Helpers
+  function logStatus(s){ statusEl.textContent = 'Status: ' + s; }
+  function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function normalizeWord(w){ return String(w||'').replace(/[^a-z']/gi,'').toLowerCase(); }
+
+  function similarity(a,b){
+    a = normalizeWord(a); b = normalizeWord(b);
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    const ed = editDistance(a,b);
+    const longer = Math.max(a.length, b.length);
+    return (longer - ed) / longer;
+  }
+  function editDistance(a,b){
+    a = String(a||''); b = String(b||'');
+    const m = a.length, n = b.length;
+    const dp = Array.from({length:m+1}, ()=>Array(n+1).fill(0));
+    for(let i=0;i<=m;i++) dp[i][0]=i;
+    for(let j=0;j<=n;j++) dp[0][j]=j;
+    for(let i=1;i<=m;i++){
+      for(let j=1;j<=n;j++){
+        dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1] + (a[i-1]===b[j-1]?0:1));
+      }
     }
+    return dp[m][n];
+  }
 
-    words = text.split(/\s+/);
+  function chooseMaleUSVoice(){
+    const voices = speechSynthesis.getVoices() || [];
+    let chosen = voices.find(v => v.lang && v.lang.startsWith('en-US') && /male|man|david|john|daniel|tom/i.test(v.name));
+    if (!chosen) chosen = voices.find(v => v.lang && v.lang.startsWith('en-US'));
+    return chosen || null;
+  }
+
+  function speakCorrectOnce(word){
+    try { if (speechSynthesis.speaking) speechSynthesis.cancel(); } catch(e){}
+    const u = new SpeechSynthesisUtterance(word);
+    const v = chooseMaleUSVoice();
+    if (v) u.voice = v;
+    u.rate = 0.95;
+    speechSynthesis.speak(u);
+  }
+
+  // Prepare text into tokens
+  prepareBtn.addEventListener('click', () => {
+    const raw = inputBox.value || '';
+    if (!raw.trim()){ alert('Paste some text first'); return; }
+    // split into tokens, keep punctuation attached for display but normalize for comparison
+    tokens = raw.trim().split(/\s+/).filter(Boolean);
     currentIndex = 0;
+    processedSpokenCount = 0;
+    mistakes = [];
+    renderTokens();
+    mistakesBox.style.display = 'none';
+    logStatus('Prepared. Ready to start.');
+    // enable start
+    startBtn.disabled = false;
+  });
 
-    const output = document.getElementById("output");
-    output.innerHTML = "";
-
-    words.forEach((w, i) => {
-        const span = document.createElement("span");
-        span.className = "word";
-        span.id = "word-" + i;
-        span.innerText = w + " ";
-        output.appendChild(span);
+  function renderTokens(){
+    output.innerHTML = '';
+    tokens.forEach((t,i) => {
+      const span = document.createElement('span');
+      span.className = 'token pending';
+      span.id = 'tok-' + i;
+      span.innerHTML = escapeHtml(t) + ' ';
+      output.appendChild(span);
     });
-}
+  }
 
-function speakCorrect(word) {
-    const utter = new SpeechSynthesisUtterance(word);
-    utter.rate = 0.9;
-    speechSynthesis.speak(utter);
-}
+  // Reset
+  resetBtn.addEventListener('click', () => {
+    if (recognition) stopRecognition();
+    tokens = [];
+    currentIndex = 0;
+    mistakes = [];
+    chunks = [];
+    audioURL = null;
+    output.innerHTML = '';
+    mistakesList.innerHTML = '';
+    mistakesBox.style.display = 'none';
+    playRecording.disabled = true;
+    downloadRecording.disabled = true;
+    logStatus('Reset.');
+  });
 
-function startReading() {
-    if (!words.length) {
-        alert("Click 'Prepare Text' first!");
-        return;
+  // Start reading: load mic and start recognition and recorder
+  startBtn.addEventListener('click', async () => {
+    if (!tokens.length){ alert('Click Prepare Text first'); return; }
+    // get mic
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // start recorder (record full session)
+      startRecorder(stream);
+      // start speech recognition
+      startRecognition();
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      logStatus('Listening... Read aloud. (Recording active)');
+      collecting = true;
+    } catch (err) {
+      console.error(err);
+      alert('Microphone access is required. Please allow microphone permission.');
+      logStatus('Mic permission denied');
     }
+  });
 
-    if (!('webkitSpeechRecognition' in window)) {
-        alert("Your browser does not support speech recognition.");
-        return;
+  // Stop reading
+  stopBtn.addEventListener('click', () => {
+    stopRecognition();
+    stopRecorder();
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    logStatus('Stopped. You can play or download the recording.');
+    collecting = false;
+  });
+
+  // MediaRecorder: record whole spoken session
+  function startRecorder(stream){
+    chunks = [];
+    try {
+      recorder = new MediaRecorder(stream);
+    } catch (e) {
+      // older Safari may need mimeType adjustments
+      try { recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' }); } catch(e){ recorder = null; console.warn('Recorder not supported', e); }
     }
+    if (!recorder) {
+      logStatus('Recording not supported in this browser');
+      playRecording.disabled = true;
+      downloadRecording.disabled = true;
+      return;
+    }
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' });
+      if (audioURL) URL.revokeObjectURL(audioURL);
+      audioURL = URL.createObjectURL(blob);
+      playRecording.disabled = false;
+      downloadRecording.disabled = false;
+      // attach download
+      downloadRecording.onclick = () => {
+        const a = document.createElement('a');
+        a.href = audioURL;
+        a.download = 'speakright_recording.webm';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      };
+      playRecording.onclick = () => {
+        const a = new Audio(audioURL);
+        a.play();
+      };
+    };
+    recorder.start();
+  }
 
-    recognition = new webkitSpeechRecognition();
-    recognition.lang = "en-US";
+  function stopRecorder(){
+    try {
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+    } catch(e){}
+    recorder = null;
+  }
+
+  // Speech Recognition
+  function startRecognition(){
+    // reset pointer to current index if desired (we keep currentIndex as is)
+    processedSpokenCount = 0;
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      alert('Speech recognition not supported in this browser. Use Chrome desktop/Android.');
+      logStatus('SpeechRecognition not supported');
+      return;
+    }
+    recognition = new SR();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
     recognition.continuous = true;
-    recognition.interimResults = true;
 
-    recognition.onresult = function(event) {
-        const result = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
-        const spokenWords = result.split(" ");
-
-        let lastWord = spokenWords[spokenWords.length - 1];
-
-        if (!lastWord) return;
-
-        if (currentIndex >= words.length) return;
-
-        let expected = words[currentIndex].toLowerCase();
-
-        let element = document.getElementById("word-" + currentIndex);
-
-        // Check similarity
-        let correct =
-            lastWord === expected ||
-            lastWord.replace(/[^a-z]/g, "") === expected.replace(/[^a-z]/g, "") ||
-            similarity(lastWord, expected) > 0.7;
-
-        if (correct) {
-            element.classList.add("correct");
-            currentIndex++;
-        } else {
-            element.classList.add("wrong");
-            speakCorrect(expected);
-        }
+    recognition.onresult = (ev) => {
+      // process only final results (ev.results[*].isFinal true)
+      for (let i = ev.resultIndex; i < ev.results.length; i++){
+        const res = ev.results[i];
+        if (!res.isFinal) continue;
+        const transcript = res[0].transcript.trim().toLowerCase();
+        // console.log('FINAL TRANSCRIPT:', transcript);
+        processTranscriptChunk(transcript);
+      }
     };
 
-    recognition.start();
-}
+    recognition.onerror = (e) => {
+      console.warn('recognition error', e);
+      // do not stop recorder here; allow user to stop manually
+    };
 
-function stopReading() {
-    if (recognition) recognition.stop();
-}
+    recognition.onend = () => {
+      // automatic restart for continuous listening if collecting
+      if (collecting) {
+        try { recognition.start(); } catch(e){}
+      }
+    };
 
-// Simple similarity scoring
-function similarity(a, b) {
-    let longer = a.length > b.length ? a : b;
-    let shorter = a.length > b.length ? b : a;
-    let longerLength = longer.length;
-    if (longerLength === 0) return 1.0;
-    return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
-}
-
-function editDistance(a, b) {
-    a = a.toLowerCase();
-    b = b.toLowerCase();
-    let costs = [];
-    for (let i = 0; i <= a.length; i++) {
-        let lastValue = i;
-        for (let j = 0; j <= b.length; j++) {
-            if (i === 0)
-                costs[j] = j;
-            else {
-                if (j > 0) {
-                    let newValue = costs[j - 1];
-                    if (a.charAt(i - 1) !== b.charAt(j - 1))
-                        newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-                    costs[j - 1] = lastValue;
-                    lastValue = newValue;
-                }
-            }
-        }
-        if (i > 0)
-            costs[b.length] = lastValue;
+    try {
+      recognition.start();
+    } catch (e) {
+      console.warn('recognition start failed', e);
     }
-    return costs[b.length];
-}
-</script>
+  }
 
+  function stopRecognition(){
+    try { if (recognition) recognition.stop(); } catch(e){}
+    recognition = null;
+  }
+
+  // Process a final transcript chunk: split into words and evaluate sequentially
+  function processTranscriptChunk(chunk){
+    const spokenWords = chunk.split(/\s+/).filter(Boolean);
+    if (!spokenWords.length) return;
+    // We iterate spoken words one by one and compare to current token
+    for (let sWord of spokenWords){
+      // guard: if all tokens done, stop
+      if (currentIndex >= tokens.length){
+        // finished
+        stopRecognition();
+        stopRecorder();
+        logStatus('All tokens checked — session complete');
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        collecting = false;
+        return;
+      }
+
+      const expectedRaw = tokens[currentIndex];
+      const expected = normalizeWord(expectedRaw);
+      const spokenNorm = normalizeWord(sWord);
+
+      // Decide matching: similarity threshold
+      const sim = similarity(spokenNorm, expected);
+      const accepted = sim >= 0.62 || spokenNorm === expected;
+
+      const el = document.getElementById('tok-' + currentIndex);
+      if (!el) { currentIndex++; continue; }
+
+      if (accepted){
+        // correct
+        el.classList.remove('pending','bad','unclear'); el.classList.add('good');
+        currentIndex++;
+      } else {
+        // wrong: mark bad, add to mistakes if not already recorded for this index
+        el.classList.remove('pending','good','unclear'); el.classList.add('bad');
+        // add to mistakes list if not duplicate for same index
+        if (!mistakes.find(m => m.index === currentIndex)){
+          mistakes.push({ index: currentIndex, expected: expectedRaw, spoken: sWord });
+          updateMistakesUI();
+        }
+        // speak correct pron once
+        speakCorrectOnce(expectedRaw);
+        // keep currentIndex unchanged so user can retry reading same word
+        // do not advance currentIndex
+      }
+    } // end for spokenWords
+  }
+
+  function updateMistakesUI(){
+    if (!mistakes.length){ mistakesBox.style.display = 'none'; mistakesList.innerHTML = ''; return; }
+    mistakesBox.style.display = 'block';
+    mistakesList.innerHTML = '';
+    mistakes.forEach(m => {
+      const div = document.createElement('div');
+      div.className = 'mistake-item';
+      const left = document.createElement('div');
+      left.innerHTML = `<strong>${escapeHtml(m.expected)}</strong> &nbsp; <span class="small">(you said: ${escapeHtml(m.spoken)})</span>`;
+      const right = document.createElement('div');
+      // play correct pron and a "retry" jump button
+      const btnSpeak = document.createElement('button');
+      btnSpeak.className = 'btn secondary';
+      btnSpeak.textContent = 'Hear';
+      btnSpeak.onclick = () => speakCorrectOnce(m.expected);
+      const btnGo = document.createElement('button');
+      btnGo.className = 'btn secondary';
+      btnGo.textContent = 'Retry';
+      btnGo.onclick = () => {
+        // jump currentIndex to this index so user can re-read from here
+        currentIndex = m.index;
+        // update UI: mark future tokens pending, current token pending
+        for (let i=0;i<tokens.length;i++){
+          const el = document.getElementById('tok-'+i);
+          if (!el) continue;
+          el.classList.remove('good','bad','unclear','pending');
+          if (i < currentIndex) el.classList.add('good'); else el.classList.add('pending');
+        }
+        // hide mistakes? keep them visible for reference
+        // focus user
+        document.getElementById('tok-'+currentIndex)?.scrollIntoView({behavior:'smooth', block:'center'});
+      };
+      right.appendChild(btnSpeak);
+      right.appendChild(btnGo);
+      div.appendChild(left);
+      div.appendChild(right);
+      mistakesList.appendChild(div);
+    });
+  }
+
+  // If no recognition result or model issues
+  function markAllUnclear(){
+    for (let i=0;i<tokens.length;i++){
+      const el = document.getElementById('tok-' + i);
+      if (el) { el.classList.remove('pending','good','bad'); el.classList.add('unclear'); }
+    }
+    logStatus('No speech detected or not recognized clearly.');
+  }
+
+  // Initialize token classes on prepare
+  function initPendingClasses(){
+    for (let i=0;i<tokens.length;i++){
+      const el = document.getElementById('tok-' + i);
+      if (el) { el.classList.remove('good','bad','unclear'); el.classList.add('pending'); }
+    }
+    // ensure current token highlighted (optional: scroll)
+    document.getElementById('tok-'+currentIndex)?.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+
+  // Start with pending classes after prepare
+  const origPrepare = prepareBtn.onclick;
+  prepareBtn.addEventListener('click', () => { initPendingClasses(); });
+
+  // expose speak function for manual testing
+  window.speakCorrectOnce = speakCorrectOnce;
+
+  // initial UI state
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  playRecording.disabled = true;
+  downloadRecording.disabled = true;
+  logStatus('Ready');
+
+  // Safari may load voices after a short time; warm up voices
+  setTimeout(()=>{ speechSynthesis.getVoices(); }, 500);
+
+})();
+</script>
 </body>
 </html>
